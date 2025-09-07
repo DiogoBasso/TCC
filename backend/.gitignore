@@ -1,0 +1,10 @@
+node_modules
+dist/
+.env
+.serverless/
+config.dev.json
+coverage/
+settings.json
+
+# Temporarily not tracking migrations 
+prisma/migrations*

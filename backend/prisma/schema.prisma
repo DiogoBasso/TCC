@@ -1,0 +1,32 @@
+generator client {
+    provider      = "prisma-client-js"
+    binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+    provider = "mysql"
+    url      = env("DATABASE_URL")
+}
+ 
+model User {
+    id Int @id @default(autoincrement())
+    name String
+    email String @unique
+    siape String @unique
+    password String
+    phone String
+    campus String 
+    class String
+    levelEducation String
+    development String?
+    master String?
+    doctor String?
+    staffing String
+    management String
+    coordination String
+    position String
+    immediateSupervisor String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+}
