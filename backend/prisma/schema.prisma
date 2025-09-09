@@ -30,3 +30,64 @@ model User {
     updatedAt DateTime @updatedAt
     deleteAt DateTime?
 }
+
+model tabelaPontuacao{
+    idTabPontuacao Int @id @default(autoincrement())
+    descricao String
+    inicioVigencia DateTime
+    fimVigencia DateTime?
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+    grupo grupo[]
+}
+
+model grupo{
+    idGrupo Int @id @default(autoincrement())
+    descricao String
+    idTabPontuacao Int
+    tabelaPontuacao tabelaPontuacao @relation(fields: [idTabPontuacao], references: [idTabPontuacao])
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+    subgrupo1 subGrupo1[]
+    atividade atividade[]
+}
+
+model subGrupo1{
+    idSubGrupo1 Int @id @default(autoincrement())
+    descricao String
+    idGrupo Int
+    grupo grupo @relation(fields: [idGrupo], references: [idGrupo])
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+    subgrupo2 subgrupo2[]
+    atividade atividade[]
+}
+
+model subgrupo2{
+    idSubGrupo2 Int @id @default(autoincrement())
+    descricao String
+    idSubGrupo1 Int
+    subGrupo1 subGrupo1 @relation(fields: [idSubGrupo1], references: [idSubGrupo1])
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+    atividade atividade[]
+}
+
+model atividade{
+    idAtividade Int @id @default(autoincrement())
+    descricao String
+    valor Int
+    idGrupo Int
+    grupo grupo @relation(fields: [idGrupo], references: [idGrupo])
+    idSubGrupo1 Int?
+    subGrupo1 subGrupo1? @relation(fields: [idSubGrupo1], references: [idSubGrupo1])
+    idSubGrupo2 Int?
+    subgrupo2 subgrupo2? @relation(fields: [idSubGrupo2], references: [idSubGrupo2])
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    deleteAt DateTime?
+}
