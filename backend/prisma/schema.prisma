@@ -1,93 +1,207 @@
 generator client {
-    provider      = "prisma-client-js"
-    binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-    provider = "mysql"
-    url      = env("DATABASE_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
- 
+
+enum RoleName {
+  ADMIN
+  CPPD_MEMBER
+  DOCENTE
+}
+
 model User {
-    id Int @id @default(autoincrement())
-    name String
-    email String @unique
-    siape String @unique
-    password String
-    phone String
-    campus String 
-    class String
-    levelEducation String
-    development String?
-    master String?
-    doctor String?
-    staffing String
-    management String
-    coordination String
-    position String
-    immediateSupervisor String
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
+  idUser       BigInt    @id @default(autoincrement())
+  name         String    @db.VarChar(120)
+  email        String    @unique @db.VarChar(180)
+  cpf          String    @unique @db.VarChar(14)
+  passwordHash String    @db.VarChar(200)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  deletedDate  DateTime?
+
+  roles                UserRole[]
+  docente              DocenteProfile?
+  CareerProcess        CareerProcess[]
+  ProcessStatusHistory ProcessStatusHistory[]
+
+  @@map("user")
 }
 
-model tabelaPontuacao{
-    idTabPontuacao Int @id @default(autoincrement())
-    descricao String
-    inicioVigencia DateTime
-    fimVigencia DateTime?
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
-    grupo grupo[]
+//tabela separada para facilitar futuras expansões (ex: grupos de permissões)
+model Role {
+  idRole BigInt     @id @default(autoincrement())
+  name   RoleName   @unique
+  users  UserRole[]
+
+  @@map("role")
 }
 
-model grupo{
-    idGrupo Int @id @default(autoincrement())
-    descricao String
-    idTabPontuacao Int
-    tabelaPontuacao tabelaPontuacao @relation(fields: [idTabPontuacao], references: [idTabPontuacao])
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
-    subgrupo1 subGrupo1[]
-    atividade atividade[]
+model UserRole {
+  userId     BigInt
+  roleId     BigInt
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [idRole], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_role")
 }
 
-model subGrupo1{
-    idSubGrupo1 Int @id @default(autoincrement())
-    descricao String
-    idGrupo Int
-    grupo grupo @relation(fields: [idGrupo], references: [idGrupo])
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
-    subgrupo2 subgrupo2[]
-    atividade atividade[]
+//tabela com dados específicos do docente, para permitir perfil de docente e membro da CPPD
+model DocenteProfile {
+  idDocente BigInt  @id @default(autoincrement())
+  userId    BigInt  @unique
+  siape     String? @db.VarChar(30)
+  depto     String? @db.VarChar(120)
+
+  user User @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+
+  @@map("docente_profile")
 }
 
-model subgrupo2{
-    idSubGrupo2 Int @id @default(autoincrement())
-    descricao String
-    idSubGrupo1 Int
-    subGrupo1 subGrupo1 @relation(fields: [idSubGrupo1], references: [idSubGrupo1])
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
-    atividade atividade[]
+model ScoringTable {
+  idScoringTable BigInt    @id @default(autoincrement())
+  name           String    @db.VarChar(120)
+  startsOn       DateTime?
+  endsOn         DateTime?
+  createdAt      DateTime  @default(now())
+
+  nodes         ScoringNode[]
+  items         ScoringItem[]
+  CareerProcess CareerProcess[]
+
+  @@map("scoring_table")
 }
 
-model atividade{
-    idAtividade Int @id @default(autoincrement())
-    descricao String
-    valor Int
-    idGrupo Int
-    grupo grupo @relation(fields: [idGrupo], references: [idGrupo])
-    idSubGrupo1 Int?
-    subGrupo1 subGrupo1? @relation(fields: [idSubGrupo1], references: [idSubGrupo1])
-    idSubGrupo2 Int?
-    subgrupo2 subgrupo2? @relation(fields: [idSubGrupo2], references: [idSubGrupo2])
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-    deleteAt DateTime?
+model ScoringNode {
+  idScoringNode  BigInt   @id @default(autoincrement())
+  scoringTableId BigInt
+  parentId       BigInt?
+  name           String   @db.VarChar(150)
+  code           String?  @db.VarChar(50) //código opcional para referência externa ex: "A1", "B2.1"
+  sortOrder      Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  table    ScoringTable  @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
+  parent   ScoringNode?  @relation("NodeChildren", fields: [parentId], references: [idScoringNode], onDelete: Cascade)
+  children ScoringNode[] @relation("NodeChildren")
+
+  items ScoringItem[]
+
+  //evita duplicar nomes entre irmãos dentro da mesma tabela de pontuação
+  @@unique([scoringTableId, parentId, name], name: "uq_sibling_name")
+  @@index([scoringTableId, parentId, sortOrder])
+  @@map("scoring_node")
+}
+
+model ScoringItem {
+  idScoringItem  BigInt  @id @default(autoincrement())
+  scoringTableId BigInt
+  nodeId         BigInt
+  description    String  @db.VarChar(255)
+  points         Decimal @db.Decimal(10, 2)
+  unit           String? @db.VarChar(30)
+  hasMaxPoints   Boolean @default(false)
+  active         Boolean @default(true)
+
+  table        ScoringTable   @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
+  node         ScoringNode    @relation(fields: [nodeId], references: [idScoringNode], onDelete: Cascade)
+  ProcessScore ProcessScore[]
+
+  @@index([nodeId])
+  @@map("scoring_item")
+}
+
+enum ProcessType {
+  PROGRESSAO
+  PROMOCAO
+}
+
+enum ProcessStatus {
+  DRAFT //rascunho do docente
+  SUBMITTED //enviado pelo docente
+  UNDER_REVIEW //em análise pela CPPD
+  APPROVED
+  REJECTED
+  RETURNED //devolvido ao docente para ajustes
+}
+
+model CareerProcess {
+  idProcess      BigInt        @id @default(autoincrement())
+  userId         BigInt
+  scoringTableId BigInt //TABELA VIGENTE “fixada” no momento da abertura
+  type           ProcessType
+  status         ProcessStatus @default(DRAFT)
+  submittedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user  User         @relation(fields: [userId], references: [idUser], onDelete: Restrict)
+  table ScoringTable @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Restrict)
+
+  scores               ProcessScore[]
+  ProcessStatusHistory ProcessStatusHistory[]
+
+  @@index([userId, status])
+  @@index([scoringTableId])
+  @@map("process")
+}
+
+model ProcessScore {
+  idProcessScore BigInt @id @default(autoincrement())
+  processId      BigInt
+  itemId         BigInt
+
+  quantity      Int     @default(0) //para itens “por unidade”
+  awardedPoints Decimal @db.Decimal(10, 2) //pontos efetivamente computados
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  process       CareerProcess   @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
+  item          ScoringItem     @relation(fields: [itemId], references: [idScoringItem], onDelete: Restrict)
+  ScoreEvidence ScoreEvidence[]
+
+  @@unique([processId, itemId]) //1 linha por item no processo
+  @@index([itemId])
+  @@map("process_score")
+}
+
+model ProcessStatusHistory {
+  idStatusHist BigInt         @id @default(autoincrement())
+  processId    BigInt
+  fromStatus   ProcessStatus?
+  toStatus     ProcessStatus
+  changedById  BigInt
+  note         String?        @db.VarChar(500)
+  changedAt    DateTime       @default(now())
+
+  process   CareerProcess @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
+  changedBy User          @relation(fields: [changedById], references: [idUser], onDelete: Restrict)
+
+  @@index([processId, changedAt])
+  @@map("process_status_history")
+}
+
+model ScoreEvidence {
+  idEvidence     BigInt   @id @default(autoincrement())
+  processScoreId BigInt
+  filename       String   @db.VarChar(180)
+  url            String   @db.VarChar(500)
+  mimeType       String?  @db.VarChar(60)
+  sizeBytes      BigInt?
+  uploadedAt     DateTime @default(now())
+
+  score ProcessScore @relation(fields: [processScoreId], references: [idProcessScore], onDelete: Cascade)
+
+  @@index([processScoreId])
+  @@map("score_evidence")
 }
