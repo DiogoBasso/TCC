@@ -15,7 +15,7 @@ enum RoleName {
 }
 
 model User {
-  idUser       BigInt    @id @default(autoincrement())
+  idUser       Int       @id @default(autoincrement())
   name         String    @db.VarChar(120)
   email        String    @unique @db.VarChar(180)
   cpf          String    @unique @db.VarChar(14)
@@ -23,6 +23,7 @@ model User {
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   deletedDate  DateTime?
+  updatedAt    DateTime  @updatedAt
 
   roles                UserRole[]
   docente              DocenteProfile?
@@ -34,17 +35,22 @@ model User {
 
 //tabela separada para facilitar futuras expansões (ex: grupos de permissões)
 model Role {
-  idRole BigInt     @id @default(autoincrement())
-  name   RoleName   @unique
-  users  UserRole[]
+  idRole      BigInt     @id @default(autoincrement())
+  name        RoleName   @unique
+  createdAt   DateTime   @default(now())
+  deletedDate DateTime?
+  updatedAt   DateTime   @updatedAt
+  users       UserRole[]
 
   @@map("role")
 }
 
 model UserRole {
-  userId     BigInt
-  roleId     BigInt
-  assignedAt DateTime @default(now())
+  userId      Int
+  roleId      BigInt
+  assignedAt  DateTime  @default(now())
+  deletedDate DateTime?
+  updatedAt   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [idUser], onDelete: Cascade)
   role Role @relation(fields: [roleId], references: [idRole], onDelete: Cascade)
@@ -55,22 +61,38 @@ model UserRole {
 
 //tabela com dados específicos do docente, para permitir perfil de docente e membro da CPPD
 model DocenteProfile {
-  idDocente BigInt  @id @default(autoincrement())
-  userId    BigInt  @unique
-  siape     String? @db.VarChar(30)
-  depto     String? @db.VarChar(120)
-
-  user User @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+  idDocente            Int       @id @default(autoincrement())
+  userId               Int       @unique
+  siape                String    @db.VarChar(30)
+  class                String    @db.VarChar(60)
+  level                String    @db.VarChar(60)
+  start_interstice     DateTime //data do início do interstício atual
+  educationLevel       String    @db.VarChar(120)
+  improvement          String?   @db.VarChar(120)
+  specialization       String?   @db.VarChar(120)
+  mastersDegree        String?   @db.VarChar(120)
+  doctorate            String?   @db.VarChar(120)
+  assignment           String?   @db.VarChar(120)
+  department           String?   @db.VarChar(120)
+  division             String?   @db.VarChar(120)
+  role                 String?   @db.VarChar(120)
+  immediate_supervisor String?   @db.VarChar(120)
+  user                 User      @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+  createdAt            DateTime  @default(now())
+  deletedDate          DateTime?
+  updatedAt            DateTime  @updatedAt
 
   @@map("docente_profile")
 }
 
 model ScoringTable {
-  idScoringTable BigInt    @id @default(autoincrement())
+  idScoringTable Int       @id @default(autoincrement())
   name           String    @db.VarChar(120)
   startsOn       DateTime?
   endsOn         DateTime?
   createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedDate    DateTime?
 
   nodes         ScoringNode[]
   items         ScoringItem[]
@@ -80,15 +102,16 @@ model ScoringTable {
 }
 
 model ScoringNode {
-  idScoringNode  BigInt   @id @default(autoincrement())
-  scoringTableId BigInt
-  parentId       BigInt?
-  name           String   @db.VarChar(150)
-  code           String?  @db.VarChar(50) //código opcional para referência externa ex: "A1", "B2.1"
-  sortOrder      Int      @default(0)
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  idScoringNode  Int       @id @default(autoincrement())
+  scoringTableId Int
+  parentId       Int?
+  name           String    @db.VarChar(150)
+  code           String?   @db.VarChar(50) //código opcional para referência externa ex: "A1", "B2.1"
+  sortOrder      Int       @default(0)
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedDate    DateTime?
 
   table    ScoringTable  @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
   parent   ScoringNode?  @relation("NodeChildren", fields: [parentId], references: [idScoringNode], onDelete: Cascade)
@@ -103,14 +126,17 @@ model ScoringNode {
 }
 
 model ScoringItem {
-  idScoringItem  BigInt  @id @default(autoincrement())
-  scoringTableId BigInt
-  nodeId         BigInt
-  description    String  @db.VarChar(255)
-  points         Decimal @db.Decimal(10, 2)
-  unit           String? @db.VarChar(30)
-  hasMaxPoints   Boolean @default(false)
-  active         Boolean @default(true)
+  idScoringItem  Int       @id @default(autoincrement())
+  scoringTableId Int
+  nodeId         Int
+  description    String    @db.VarChar(255)
+  points         Decimal   @db.Decimal(10, 2)
+  unit           String?   @db.VarChar(30)
+  hasMaxPoints   Boolean   @default(false)
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedDate    DateTime?
 
   table        ScoringTable   @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
   node         ScoringNode    @relation(fields: [nodeId], references: [idScoringNode], onDelete: Cascade)
@@ -135,14 +161,15 @@ enum ProcessStatus {
 }
 
 model CareerProcess {
-  idProcess      BigInt        @id @default(autoincrement())
-  userId         BigInt
-  scoringTableId BigInt //TABELA VIGENTE “fixada” no momento da abertura
+  idProcess      Int           @id @default(autoincrement())
+  userId         Int
+  scoringTableId Int //TABELA VIGENTE “fixada” no momento da abertura
   type           ProcessType
   status         ProcessStatus @default(DRAFT)
   submittedAt    DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+  deletedDate    DateTime?
 
   user  User         @relation(fields: [userId], references: [idUser], onDelete: Restrict)
   table ScoringTable @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Restrict)
@@ -156,15 +183,16 @@ model CareerProcess {
 }
 
 model ProcessScore {
-  idProcessScore BigInt @id @default(autoincrement())
-  processId      BigInt
-  itemId         BigInt
+  idProcessScore Int @id @default(autoincrement())
+  processId      Int
+  itemId         Int
 
   quantity      Int     @default(0) //para itens “por unidade”
   awardedPoints Decimal @db.Decimal(10, 2) //pontos efetivamente computados
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedDate DateTime?
 
   process       CareerProcess   @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
   item          ScoringItem     @relation(fields: [itemId], references: [idScoringItem], onDelete: Restrict)
@@ -176,29 +204,34 @@ model ProcessScore {
 }
 
 model ProcessStatusHistory {
-  idStatusHist BigInt         @id @default(autoincrement())
-  processId    BigInt
+  idStatusHist Int            @id @default(autoincrement())
+  processId    Int
   fromStatus   ProcessStatus?
   toStatus     ProcessStatus
-  changedById  BigInt
+  changedById  Int
   note         String?        @db.VarChar(500)
-  changedAt    DateTime       @default(now())
+  updatedAt    DateTime       @default(now())
+  createdAt    DateTime       @default(now())
+  deletedDate  DateTime?
 
   process   CareerProcess @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
   changedBy User          @relation(fields: [changedById], references: [idUser], onDelete: Restrict)
 
-  @@index([processId, changedAt])
+  @@index([processId, updatedAt])
   @@map("process_status_history")
 }
 
 model ScoreEvidence {
-  idEvidence     BigInt   @id @default(autoincrement())
-  processScoreId BigInt
-  filename       String   @db.VarChar(180)
-  url            String   @db.VarChar(500)
-  mimeType       String?  @db.VarChar(60)
+  idEvidence     Int       @id @default(autoincrement())
+  processScoreId Int
+  filename       String    @db.VarChar(180)
+  url            String    @db.VarChar(500)
+  mimeType       String?   @db.VarChar(60)
   sizeBytes      BigInt?
-  uploadedAt     DateTime @default(now())
+  uploadedAt     DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedDate    DateTime?
 
   score ProcessScore @relation(fields: [processScoreId], references: [idProcessScore], onDelete: Cascade)
 

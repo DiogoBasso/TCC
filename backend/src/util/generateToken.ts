@@ -1,16 +1,17 @@
-import { UserRole } from "@prisma/client"
 import jwt from "jsonwebtoken"
+import { RoleName } from "@prisma/client"
 
-export function generateAccessToken(userRole: UserRole, userId: number, isTeacher: boolean): string {
-    return jwt.sign({
-        userRole: userRole,
-        userId: userId,
-        isTeacher: isTeacher
-    }, String(process.env.JWT_SECRET), { expiresIn: process.env.JWT_ACCESS_EXPIRATION })
+export function generateAccessToken(roles: RoleName[], userId: number, selectedRole: RoleName | null) {
+  const payload = { sub: userId, roles, selectedRole }
+  return jwt.sign(payload, String(process.env.JWT_ACCESS_SECRET), {
+    expiresIn: String(process.env.JWT_ACCESS_EXPIRATION)
+  })
 }
 
-export function generateRefreshToken(userId: number): string {
-    return jwt.sign({
-        jit: userId,
-    }, String(process.env.JWT_REFRESH_SECRET), { expiresIn: process.env.JWT_REFRESH_EXPIRATION })
+
+export function generateRefreshToken(userId: number, selectedRole: RoleName | null) {
+  const payload = { userId, selectedRole }
+  return jwt.sign(payload, String(process.env.JWT_REFRESH_SECRET), {
+    expiresIn: String(process.env.JWT_REFRESH_EXPIRATION)
+  })
 }
