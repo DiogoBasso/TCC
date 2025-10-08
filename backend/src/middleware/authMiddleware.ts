@@ -11,7 +11,7 @@ export function authMiddleware(req: any, res: any, next: any) {
     }
 
     try {
-        jwt.verify(token, String(process.env.JWT_SECRET))
+        jwt.verify(token, String(process.env.JWT_ACCESS_SECRET))
         next()
     } catch (error: any) {
         console.log(error.message)
