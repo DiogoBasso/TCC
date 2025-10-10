@@ -6,6 +6,9 @@ interface HttpResponseBody<T> {
 }
 
 export class HttpResponse {
+    static INTERNAL_SERVER_ERROR(res: any) {
+        throw new Error("Method not implemented.")
+    }
     static ok<T>(res: any, message: string, data: T | null) {
         const body: HttpResponseBody<T> = {
             status: StatusCodeDescription.SUCCESS,

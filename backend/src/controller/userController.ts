@@ -8,6 +8,7 @@ import { InvalidCredentials } from "../exception/invalid-credentials"
 import { InvalidRefreshToken } from "../exception/invalid-refresh-token"
 import { RoleName } from "@prisma/client"
 import { UserNotFound } from "../exception/user-not-found"
+import { revokeAccessToken, revokeRefreshToken, isLikelyJwt } from "../util/tokenBlacklist"
 
 export class UserController {
   constructor(private readonly userService: UserService) {}
@@ -22,6 +23,41 @@ export class UserController {
       if (error instanceof InvalidCredentials) {
         return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_CREDENTIALS, error.message, null)
       }
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async logout(req: any, res: any): Promise<void> {
+    try {
+      // Tenta revogar o access token do header Authorization
+      const header: string | undefined = req.headers?.authorization || req.header("Authorization")
+      let revokedAccess = false
+      if (header) {
+        let t = header.trim().replace(/^bearer[:=]?\s+/i, "")
+        if (/^bearer/i.test(t)) {
+          const parts = t.split(/\s+/)
+          if (parts.length >= 2) t = parts.slice(1).join(" ")
+        }
+        t = t.replace(/^['"]+|['"]+$/g, "").trim()
+        if (isLikelyJwt(t)) {
+          revokeAccessToken(t)
+          revokedAccess = true
+        }
+      }
+
+      // Tenta revogar refreshToken vindo no body
+      const refreshToken: string | undefined = req.body?.refreshToken
+      let revokedRefresh = false
+      if (refreshToken && isLikelyJwt(refreshToken)) {
+        revokeRefreshToken(refreshToken)
+        revokedRefresh = true
+      }
+
+      return HttpResponse.ok(res, "Logged out", {
+        revokedAccess,
+        revokedRefresh
+      })
+    } catch {
       return HttpResponse.internalError(res)
     }
   }

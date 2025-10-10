@@ -13,14 +13,14 @@ export function userRoute() {
   )
 
   router.get(
-    "/users/:userId",
-    validatorMiddleware(ParamType.PARAMS, userIdParamSchema),
-    async (req, res) => await userController.getUserById(req, res)
+    "/users/active",
+    async (req, res) => await userController.getAllActiveUsers(req, res)
   )
 
   router.get(
-    "/users/active",
-    async (req, res) => await userController.getAllActiveUsers(req, res)
+    "/users/:userId",
+    validatorMiddleware(ParamType.PARAMS, userIdParamSchema),
+    async (req, res) => await userController.getUserById(req, res)
   )
 
   router.put(

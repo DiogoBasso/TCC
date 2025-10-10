@@ -8,6 +8,7 @@ import { LoginResponseWithRoles } from "../type/response/userResponse"
 import { InvalidCredentials } from "../exception/invalid-credentials"
 import { generateAccessToken, generateRefreshToken } from "../util/generateToken"
 import { decodeRefreshToken } from "../util/decodeToken"
+import { isRefreshTokenRevoked } from "../util/tokenBlacklist"
 import { InvalidRefreshToken } from "../exception/invalid-refresh-token"
 import { UserNotFound } from "../exception/user-not-found"
 
@@ -40,6 +41,9 @@ export class UserService {
   }
 
   async refreshToken(dto: RefreshTokenDto): Promise<LoginResponseWithRoles> {
+  if (isRefreshTokenRevoked(dto.refreshToken)) {
+    throw new InvalidRefreshToken()
+  }
   let decoded: { userId: number; selectedRole: RoleName | null }
   try {
     decoded = decodeRefreshToken(dto.refreshToken) 
@@ -72,6 +76,9 @@ export class UserService {
 
 
   async selectRole(refreshToken: string, role: RoleName): Promise<LoginResponseWithRoles> {
+    if (isRefreshTokenRevoked(refreshToken)) {
+      throw new InvalidRefreshToken()
+    }
     let decoded: { userId: number }
     try {
       decoded = decodeRefreshToken(refreshToken)

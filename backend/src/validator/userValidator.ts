@@ -63,6 +63,15 @@ export const selectRoleSchema = Joi.object({
   role: Joi.string().valid(RoleName.DOCENTE, RoleName.CPPD_MEMBER).required()
 })
 
+// Logout aceita opcionalmente um refreshToken no corpo.
+// O access token é lido do header Authorization, então não é validado aqui.
+export const logoutSchema = Joi.object({
+  refreshToken: Joi.string()
+    .trim()
+    .pattern(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/)
+    .required()
+})
+
 const updateDocenteSchema = Joi.object({
   siape: Joi.string().trim().optional(),
   class: Joi.string().trim().optional(),
@@ -100,6 +109,11 @@ export const updateUserSchema = Joi.object({
 
 export const userIdParamSchema = Joi.object({
   userId: Joi.number().integer().positive().required()
+})
+
+// Para suporte a consulta via query string: /users?id=123
+export const userIdQuerySchema = Joi.object({
+  id: Joi.number().integer().positive().required()
 })
 
 export const publicDocenteRegisterSchema = Joi.object({

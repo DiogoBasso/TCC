@@ -1,6 +1,6 @@
 import express from "express"
 import { ParamType, validatorMiddleware } from "../middleware/validatorMiddleware"
-import { loginSchema, refreshTokenSchema, selectRoleSchema } from "../validator/userValidator"
+import { loginSchema, refreshTokenSchema, selectRoleSchema, logoutSchema } from "../validator/userValidator"
 import { userController } from "../appContainer"
 import { authMiddleware } from "../middleware/authMiddleware"
 
@@ -16,6 +16,12 @@ export function authRoute() {
         "/refresh-token", 
         validatorMiddleware(ParamType.BODY, refreshTokenSchema), 
         async (req, res) => await userController.refreshToken(req, res))
+    
+     router.post(
+        "/logout",
+        validatorMiddleware(ParamType.BODY, logoutSchema),
+        async (req, res) => await userController.logout(req, res)
+    )
      router.post(
         "/select-role",
         validatorMiddleware(ParamType.BODY, selectRoleSchema),
