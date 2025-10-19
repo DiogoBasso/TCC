@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
-import { LogoutButton } from "@/components/LogoutButton"
+import HeaderActionsServer from "@/components/HeaderActionsServer"
 
 export default async function ProfessorPage() {
   const jar = await cookies()
@@ -9,9 +9,9 @@ export default async function ProfessorPage() {
 
   return (
     <main className="p-6 flex flex-col min-h-screen bg-gray-50">
-      <header className="flex justify-between items-center mb-6">
+      <header className="flex justify-between items-center mb-6 gap-4">
         <h1 className="text-2xl font-semibold">Módulo do Professor</h1>
-        <LogoutButton />
+        <HeaderActionsServer />
       </header>
 
       <section>

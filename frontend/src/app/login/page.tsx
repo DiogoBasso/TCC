@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 type Role = "DOCENTE" | "CPPD_MEMBER" | "ADMIN"
 
 function pathForRole(role: Role | null | undefined) {
-  if (role === "DOCENTE") return "/professor"
+  if (role === "DOCENTE") return "/docente"
   if (role === "CPPD_MEMBER") return "/cppd"
   if (role === "ADMIN") return "/dashboard"
   return "/dashboard"

@@ -29,8 +29,8 @@ export default function SelectRolePage() {
   }, [router])
 
   const label = useMemo(() => ({
-    DOCENTE: "Professor",
-    CPPD_MEMBER: "Membro CPPD",
+    DOCENTE: "Docente",
+    CPPD_MEMBER: "Membro Da CPPD",
     ADMIN: "Admin"
   } as Record<Role, string>), [])
 
@@ -52,7 +52,7 @@ export default function SelectRolePage() {
     }
 
     if (role === "DOCENTE") {
-      router.replace("/professor")
+      router.replace("/docente")
     } else if (role === "CPPD_MEMBER") {
       router.replace("/cppd")
     } else {
@@ -77,7 +77,7 @@ export default function SelectRolePage() {
               className="rounded-xl border px-4 py-3 text-left hover:bg-gray-50 disabled:opacity-50"
             >
               <div className="font-medium">{label[r]}</div>
-              <div className="text-xs text-gray-500">{r}</div>
+              {/* <div className="text-xs text-gray-500">{r}</div> */}
             </button>
           ))}
         </div>
