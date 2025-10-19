@@ -62,3 +62,66 @@ export const selectRoleSchema = Joi.object({
   refreshToken: Joi.string().trim().required(),
   role: Joi.string().valid(RoleName.DOCENTE, RoleName.CPPD_MEMBER).required()
 })
+
+export const logoutSchema = Joi.object({
+  refreshToken: Joi.string()
+    .trim()
+    .pattern(/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/)
+    .required()
+})
+
+const updateDocenteSchema = Joi.object({
+  siape: Joi.string().trim().optional(),
+  class: Joi.string().trim().optional(),
+  level: Joi.string().trim().optional(),
+  startInterstice: Joi.date().optional(),
+  educationLevel: Joi.string().trim().optional(),
+  improvement: Joi.string().trim().allow(null).optional(),
+  specialization: Joi.string().trim().allow(null).optional(),
+  mastersDegree: Joi.string().trim().allow(null).optional(),
+  doctorate: Joi.string().trim().allow(null).optional(),
+  assignment: Joi.string().trim().allow(null).optional(),
+  department: Joi.string().trim().allow(null).optional(),
+  division: Joi.string().trim().allow(null).optional(),
+  role: Joi.string().trim().allow(null).optional(),
+  immediateSupervisor: Joi.string().trim().allow(null).optional()
+})
+
+export const updateUserSchema = Joi.object({
+  name: Joi.string().trim().optional(),
+  email: Joi.string().email().optional(),
+  cpf: Joi.string()
+    .trim()
+    .custom((value, helpers) => {
+      if (value === undefined) return value
+      return !cpfValidator.isValid(value) ? helpers.error("any.invalid") : value
+    })
+    .messages({ "any.invalid": "CPF inválido" })
+    .optional(),
+  active: Joi.boolean().optional(),
+  roles: Joi.array()
+    .items(Joi.string().valid(RoleName.ADMIN, RoleName.CPPD_MEMBER, RoleName.DOCENTE))
+    .optional(),
+  docenteProfile: updateDocenteSchema.optional()
+})
+
+export const userIdParamSchema = Joi.object({
+  userId: Joi.number().integer().positive().required()
+})
+
+export const userIdQuerySchema = Joi.object({
+  id: Joi.number().integer().positive().required()
+})
+
+export const publicDocenteRegisterSchema = Joi.object({
+  name: Joi.string().trim().required(),
+  email: Joi.string().email().required(),
+  cpf: Joi.string()
+    .trim()
+    .custom((v, h) => (!cpfValidator.isValid(v) ? h.error("any.invalid") : v))
+    .messages({ "any.invalid": "CPF inválido" })
+    .required(),
+  password: Joi.string().min(8).required(),
+  docenteProfile: docenteProfileSchema.required(),
+  roles: Joi.forbidden() 
+})

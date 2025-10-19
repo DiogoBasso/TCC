@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs"
 import { RoleName } from "@prisma/client"
-import { CreateUserDto, UserResponseDto, DocenteProfileResponseDto, LoginDto, RefreshTokenDto } from "../type/dto/userDto"
+import { CreateUserDto, UserResponseDto, DocenteProfileResponseDto, LoginDto, RefreshTokenDto, UpdateUserDto } from "../type/dto/userDto"
 import { UserRepository } from "../repository/userRepository"
 import { UserExists } from "../exception/user-exists"
 import { DocenteProfileRequired } from "../exception/docente-profile-required"
@@ -8,7 +8,9 @@ import { LoginResponseWithRoles } from "../type/response/userResponse"
 import { InvalidCredentials } from "../exception/invalid-credentials"
 import { generateAccessToken, generateRefreshToken } from "../util/generateToken"
 import { decodeRefreshToken } from "../util/decodeToken"
+import { isRefreshTokenRevoked } from "../util/tokenBlacklist"
 import { InvalidRefreshToken } from "../exception/invalid-refresh-token"
+import { UserNotFound } from "../exception/user-not-found"
 
 export class UserService {
   constructor(
@@ -39,6 +41,9 @@ export class UserService {
   }
 
   async refreshToken(dto: RefreshTokenDto): Promise<LoginResponseWithRoles> {
+  if (isRefreshTokenRevoked(dto.refreshToken)) {
+    throw new InvalidRefreshToken()
+  }
   let decoded: { userId: number; selectedRole: RoleName | null }
   try {
     decoded = decodeRefreshToken(dto.refreshToken) 
@@ -71,6 +76,9 @@ export class UserService {
 
 
   async selectRole(refreshToken: string, role: RoleName): Promise<LoginResponseWithRoles> {
+    if (isRefreshTokenRevoked(refreshToken)) {
+      throw new InvalidRefreshToken()
+    }
     let decoded: { userId: number }
     try {
       decoded = decodeRefreshToken(refreshToken)
@@ -145,6 +153,78 @@ export class UserService {
       }
       throw err
     }
+  }
+
+   async getUserById(userId: number): Promise<UserResponseDto> {
+    const user = await this.userRepository.findById(userId)
+    if (!user) throw new UserNotFound()
+    return this.toResponse(user)
+  }
+
+  async getAllActiveUsers(): Promise<UserResponseDto[]> {
+    const users = await this.userRepository.findManyActive()
+    return users.map(u => this.toResponse(u))
+  }
+
+  async updateUser(userId: number, dto: UpdateUserDto): Promise<UserResponseDto> {
+    const current = await this.userRepository.findById(userId)
+    if (!current) throw new UserNotFound()
+
+    const wantsDocente = dto.roles?.includes("DOCENTE" as RoleName) ?? false
+    const hasDocente = Boolean(current.docente)
+
+    // se vai adicionar DOCENTE e ainda não tem perfil -> precisa dos campos mínimos para criar
+    if (wantsDocente && !hasDocente && !dto.docenteProfile) {
+      if (typeof DocenteProfileRequired !== "undefined") throw new DocenteProfileRequired()
+      throw new Error("Campos do DocenteProfile são obrigatórios para criar o perfil de docente")
+    }
+
+    if (wantsDocente && !hasDocente && dto.docenteProfile) {
+      const p = dto.docenteProfile
+      const missing: string[] = []
+      if (!p.siape) missing.push("siape")
+      if (!p.class) missing.push("class")
+      if (!p.level) missing.push("level")
+      if (!p.startInterstice) missing.push("startInterstice")
+      if (!p.educationLevel) missing.push("educationLevel")
+      if (missing.length) throw new Error(`Campos obrigatórios para criar DocenteProfile ausentes: ${missing.join(", ")}`)
+    }
+
+    const updated = await this.userRepository.updateWithRolesAndDocente(userId, {
+      name: dto.name,
+      email: dto.email,
+      cpf: dto.cpf,
+      active: dto.active,
+      roles: dto.roles as RoleName[] | undefined,
+      docenteProfile: dto.docenteProfile
+        ? {
+            siape: dto.docenteProfile.siape,
+            class: dto.docenteProfile.class,
+            level: dto.docenteProfile.level,
+            startInterstice: dto.docenteProfile.startInterstice,
+            educationLevel: dto.docenteProfile.educationLevel,
+            improvement: dto.docenteProfile.improvement ?? null,
+            specialization: dto.docenteProfile.specialization ?? null,
+            mastersDegree: dto.docenteProfile.mastersDegree ?? null,
+            doctorate: dto.docenteProfile.doctorate ?? null,
+            assignment: dto.docenteProfile.assignment ?? null,
+            department: dto.docenteProfile.department ?? null,
+            division: dto.docenteProfile.division ?? null,
+            role: dto.docenteProfile.role ?? null,
+            immediateSupervisor: dto.docenteProfile.immediateSupervisor ?? null
+          }
+        : undefined
+    })
+
+    return this.toResponse(updated)
+  }
+
+  async deleteUserById(userId: number): Promise<UserResponseDto> {
+    const current = await this.userRepository.findById(userId)
+    if (!current) throw new UserNotFound()
+
+    const deleted = await this.userRepository.deleteUserById(userId)
+    return this.toResponse(deleted)
   }
 
   private toResponse(user: any): UserResponseDto {

@@ -7,6 +7,8 @@ import { LoginResponseWithRoles } from "../type/response/userResponse"
 import { InvalidCredentials } from "../exception/invalid-credentials"
 import { InvalidRefreshToken } from "../exception/invalid-refresh-token"
 import { RoleName } from "@prisma/client"
+import { UserNotFound } from "../exception/user-not-found"
+import { revokeAccessToken, revokeRefreshToken, isLikelyJwt } from "../util/tokenBlacklist"
 
 export class UserController {
   constructor(private readonly userService: UserService) {}
@@ -21,6 +23,41 @@ export class UserController {
       if (error instanceof InvalidCredentials) {
         return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_CREDENTIALS, error.message, null)
       }
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async logout(req: any, res: any): Promise<void> {
+    try {
+      // Tenta revogar o access token do header Authorization
+      const header: string | undefined = req.headers?.authorization || req.header("Authorization")
+      let revokedAccess = false
+      if (header) {
+        let t = header.trim().replace(/^bearer[:=]?\s+/i, "")
+        if (/^bearer/i.test(t)) {
+          const parts = t.split(/\s+/)
+          if (parts.length >= 2) t = parts.slice(1).join(" ")
+        }
+        t = t.replace(/^['"]+|['"]+$/g, "").trim()
+        if (isLikelyJwt(t)) {
+          revokeAccessToken(t)
+          revokedAccess = true
+        }
+      }
+
+      // Tenta revogar refreshToken vindo no body
+      const refreshToken: string | undefined = req.body?.refreshToken
+      let revokedRefresh = false
+      if (refreshToken && isLikelyJwt(refreshToken)) {
+        revokeRefreshToken(refreshToken)
+        revokedRefresh = true
+      }
+
+      return HttpResponse.ok(res, "Logged out", {
+        revokedAccess,
+        revokedRefresh
+      })
+    } catch {
       return HttpResponse.internalError(res)
     }
   }
@@ -150,4 +187,93 @@ export class UserController {
       return HttpResponse.internalError(res)
     }
   }
+   async getUserById(req: any, res: any): Promise<void> {
+    try {
+      const userId = Number(req.params.userId)
+      if (isNaN(userId)) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, "Invalid ID format", null)
+      }
+      const user = await this.userService.getUserById(userId)
+      return HttpResponse.ok(res, "User found", user)
+    } catch (error: any) {
+      if (error instanceof UserNotFound) {
+        return HttpResponse.notFound(res, StatusCodeDescription.USER_NOT_FOUND, error.message, null)
+      }
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async getAllActiveUsers(_req: any, res: any): Promise<void> {
+    try {
+      const users = await this.userService.getAllActiveUsers()
+      return HttpResponse.ok(res, "Active users retrieved", users)
+    } catch {
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async updateUser(req: any, res: any): Promise<void> {
+    try {
+      const userId = Number(req.params.userId)
+      if (isNaN(userId)) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, "Invalid ID format", null)
+      }
+      const updated = await this.userService.updateUser(userId, req.body)
+      return HttpResponse.ok(res, "User updated", updated)
+    } catch (error: any) {
+      if (error instanceof UserNotFound) {
+        return HttpResponse.notFound(res, StatusCodeDescription.USER_NOT_FOUND, error.message, null)
+      }
+      if (error instanceof DocenteProfileRequired) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, error.message, null)
+      }
+      if (error?.code === "P2002") {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, "Email/CPF já utilizado", null)
+      }
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async deleteUser(req: any, res: any): Promise<void> {
+    try {
+      const userId = Number(req.params.userId)
+      if (isNaN(userId)) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, "Invalid ID format", null)
+      }
+      const deleted = await this.userService.deleteUserById(userId)
+      return HttpResponse.ok(res, "User deleted", deleted)
+    } catch (error: any) {
+      if (error instanceof UserNotFound) {
+        return HttpResponse.notFound(res, StatusCodeDescription.USER_NOT_FOUND, error.message, null)
+      }
+      return HttpResponse.internalError(res)
+    }
+  }
+
+  async registerDocente(req: any, res: any): Promise<void> {
+    try {
+      const dto = {
+      name: String(req.body.name),
+      email: String(req.body.email),
+      cpf: String(req.body.cpf),
+      password: String(req.body.password),
+      roles: [RoleName.DOCENTE] as RoleName[],
+      docenteProfile: req.body.docenteProfile
+    }
+    const user = await this.userService.createUser(dto)
+    return HttpResponse.created(res, "Docente registered", user)
+    } catch (error: any) {
+      if (error instanceof UserExists) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.USER_EXISTS, error.message, null)
+      }
+      if (error instanceof DocenteProfileRequired) {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, error.message, null)
+      }
+      if (error?.code === "P2002") {
+        return HttpResponse.badRequest(res, StatusCodeDescription.INVALID_INPUT, "Email/CPF já utilizado", null)
+      }
+      return HttpResponse.internalError(res)
+    }
+  }
+
 }

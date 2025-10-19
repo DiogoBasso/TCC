@@ -6,6 +6,9 @@ interface HttpResponseBody<T> {
 }
 
 export class HttpResponse {
+    static INTERNAL_SERVER_ERROR(res: any) {
+        throw new Error("Method not implemented.")
+    }
     static ok<T>(res: any, message: string, data: T | null) {
         const body: HttpResponseBody<T> = {
             status: StatusCodeDescription.SUCCESS,
@@ -99,4 +102,5 @@ export enum StatusCodeDescription {
     EXISTING_RESOURCE = "EXISTING_RESOURCE",
     RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND",
     DUPLICATE_RESTRICTION = "DUPLICATE_RESTRICTION",
+    INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
 }
