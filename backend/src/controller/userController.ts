@@ -29,7 +29,6 @@ export class UserController {
 
   async logout(req: any, res: any): Promise<void> {
     try {
-      // Tenta revogar o access token do header Authorization
       const header: string | undefined = req.headers?.authorization || req.header("Authorization")
       let revokedAccess = false
       if (header) {
@@ -45,7 +44,6 @@ export class UserController {
         }
       }
 
-      // Tenta revogar refreshToken vindo no body
       const refreshToken: string | undefined = req.body?.refreshToken
       let revokedRefresh = false
       if (refreshToken && isLikelyJwt(refreshToken)) {
@@ -112,14 +110,16 @@ export class UserController {
       const dto = {
         name: value.name,
         email: value.email,
+        phone: value.phone,
+        city: value.city ?? null, // ✅ novo
+        uf: value.uf ?? null,     // ✅ novo
         cpf: value.cpf,
         password: value.password,
         roles: value.roles,
         docenteProfile: value.docenteProfile
           ? {
               siape: value.docenteProfile.siape,
-              class: value.docenteProfile.class,
-              level: value.docenteProfile.level,
+              classLevel: value.docenteProfile.classLevel,
               startInterstice: value.docenteProfile.startInterstice,
               educationLevel: value.docenteProfile.educationLevel,
               improvement: value.docenteProfile.improvement,
@@ -140,8 +140,11 @@ export class UserController {
       return HttpResponse.created(res, "User created", {
         idUser: user.idUser,
         name: user.name,
+        phone: user.phone,
         cpf: user.cpf,
         email: user.email,
+        city: user.city,     // ✅ novo
+        uf: user.uf,         // ✅ novo
         active: user.active,
         createdAt: user.createdAt,
         deletedDate: user.deletedDate ?? null,
@@ -150,8 +153,7 @@ export class UserController {
           ? {
               idDocente: user.docenteProfile.idDocente,
               siape: user.docenteProfile.siape,
-              class: user.docenteProfile.class,
-              level: user.docenteProfile.level,
+              classLevel: user.docenteProfile.classLevel,
               startInterstice: user.docenteProfile.startInterstice,
               educationLevel: user.docenteProfile.educationLevel,
               improvement: user.docenteProfile.improvement ?? null,
@@ -187,7 +189,8 @@ export class UserController {
       return HttpResponse.internalError(res)
     }
   }
-   async getUserById(req: any, res: any): Promise<void> {
+
+  async getUserById(req: any, res: any): Promise<void> {
     try {
       const userId = Number(req.params.userId)
       if (isNaN(userId)) {
@@ -253,16 +256,21 @@ export class UserController {
   async registerDocente(req: any, res: any): Promise<void> {
     try {
       const dto = {
-      name: String(req.body.name),
-      email: String(req.body.email),
-      cpf: String(req.body.cpf),
-      password: String(req.body.password),
-      roles: [RoleName.DOCENTE] as RoleName[],
-      docenteProfile: req.body.docenteProfile
-    }
-    const user = await this.userService.createUser(dto)
-    return HttpResponse.created(res, "Docente registered", user)
+        name: String(req.body.name),
+        email: String(req.body.email),
+        phone: req.body.phone ? String(req.body.phone) : null,
+        city: req.body.city ? String(req.body.city) : null, // ✅ novo
+        uf: req.body.uf ? String(req.body.uf) : null,       // ✅ novo
+        cpf: String(req.body.cpf),
+        password: String(req.body.password),
+        roles: [RoleName.DOCENTE] as RoleName[],   // sempre só DOCENTE na pública
+        docenteProfile: req.body.docenteProfile
+      }
+      const user = await this.userService.createUser(dto)
+      return HttpResponse.created(res, "Docente registered", user)
     } catch (error: any) {
+      console.error("Erro em registerDocente:", error)
+
       if (error instanceof UserExists) {
         return HttpResponse.badRequest(res, StatusCodeDescription.USER_EXISTS, error.message, null)
       }
@@ -275,5 +283,4 @@ export class UserController {
       return HttpResponse.internalError(res)
     }
   }
-
 }

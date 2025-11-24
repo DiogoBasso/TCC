@@ -1,6 +1,13 @@
 import bcrypt from "bcryptjs"
-import { RoleName } from "@prisma/client"
-import { CreateUserDto, UserResponseDto, DocenteProfileResponseDto, LoginDto, RefreshTokenDto, UpdateUserDto } from "../type/dto/userDto"
+import { RoleName, ClassLevel } from "@prisma/client"
+import {
+  CreateUserDto,
+  UserResponseDto,
+  DocenteProfileResponseDto,
+  LoginDto,
+  RefreshTokenDto,
+  UpdateUserDto
+} from "../type/dto/userDto"
 import { UserRepository } from "../repository/userRepository"
 import { UserExists } from "../exception/user-exists"
 import { DocenteProfileRequired } from "../exception/docente-profile-required"
@@ -12,13 +19,21 @@ import { isRefreshTokenRevoked } from "../util/tokenBlacklist"
 import { InvalidRefreshToken } from "../exception/invalid-refresh-token"
 import { UserNotFound } from "../exception/user-not-found"
 
+// 🔹 helper para garantir CPF sem máscara
+function normalizeCpf(cpf: string): string {
+  return (cpf || "").replace(/\D/g, "")
+}
+
 export class UserService {
   constructor(
     private readonly userRepository: UserRepository
   ) {}
 
   async login(dto: LoginDto): Promise<LoginResponseWithRoles> {
-    const user = await this.userRepository.findByCpf(dto.cpf)
+    const cpf = normalizeCpf(dto.cpf)
+    if (cpf.length !== 11) throw new InvalidCredentials()
+
+    const user = await this.userRepository.findByCpf(cpf)
     if (!user) throw new InvalidCredentials()
 
     const ok = await bcrypt.compare(dto.password, user.passwordHash)
@@ -41,44 +56,45 @@ export class UserService {
   }
 
   async refreshToken(dto: RefreshTokenDto): Promise<LoginResponseWithRoles> {
-  if (isRefreshTokenRevoked(dto.refreshToken)) {
-    throw new InvalidRefreshToken()
+    if (isRefreshTokenRevoked(dto.refreshToken)) {
+      throw new InvalidRefreshToken()
+    }
+
+    let decoded: { userId: number; selectedRole: RoleName | null }
+    try {
+      decoded = decodeRefreshToken(dto.refreshToken)
+    } catch {
+      throw new InvalidRefreshToken()
+    }
+
+    const user = await this.userRepository.findById(decoded.userId)
+    if (!user) throw new InvalidRefreshToken()
+
+    const roles: RoleName[] = user.roles?.map((r: any) => r.role?.name).filter(Boolean) ?? []
+    const hasMultiple = roles.length > 1
+
+    const selectedRole: RoleName | null =
+      decoded.selectedRole && roles.includes(decoded.selectedRole)
+        ? decoded.selectedRole
+        : (hasMultiple ? null : (roles[0] ?? null))
+
+    return {
+      accessToken: generateAccessToken(roles, user.idUser, selectedRole),
+      expiresIn: String(process.env.JWT_ACCESS_EXPIRATION),
+      refreshToken: generateRefreshToken(user.idUser, selectedRole),
+      refreshExpiresIn: String(process.env.JWT_REFRESH_EXPIRATION),
+      firstAccess: false,
+      roles,
+      selectedRole,
+      needsProfileSelection: hasMultiple && !selectedRole
+    }
   }
-  let decoded: { userId: number; selectedRole: RoleName | null }
-  try {
-    decoded = decodeRefreshToken(dto.refreshToken) 
-  } catch {
-    throw new InvalidRefreshToken()
-  }
-
-  const user = await this.userRepository.findById(decoded.userId)
-  if (!user) throw new InvalidRefreshToken()
-
-  const roles: RoleName[] = user.roles?.map((r: any) => r.role?.name).filter(Boolean) ?? []
-  const hasMultiple = roles.length > 1
-
-  const selectedRole: RoleName | null =
-    decoded.selectedRole && roles.includes(decoded.selectedRole)
-      ? decoded.selectedRole
-      : (hasMultiple ? null : (roles[0] ?? null))
-
-  return {
-    accessToken: generateAccessToken(roles, user.idUser, selectedRole),
-    expiresIn: String(process.env.JWT_ACCESS_EXPIRATION),
-    refreshToken: generateRefreshToken(user.idUser, selectedRole),
-    refreshExpiresIn: String(process.env.JWT_REFRESH_EXPIRATION),
-    firstAccess: false,
-    roles,
-    selectedRole,
-    needsProfileSelection: hasMultiple && !selectedRole
-  }
-}
-
 
   async selectRole(refreshToken: string, role: RoleName): Promise<LoginResponseWithRoles> {
     if (isRefreshTokenRevoked(refreshToken)) {
       throw new InvalidRefreshToken()
     }
+
     let decoded: { userId: number }
     try {
       decoded = decodeRefreshToken(refreshToken)
@@ -105,12 +121,14 @@ export class UserService {
   }
 
   async createUser(dto: CreateUserDto): Promise<UserResponseDto> {
-    const existing = await this.userRepository.findByCpf(dto.cpf)
+    const normalizedCpf = normalizeCpf(dto.cpf)
+
+    const existing = await this.userRepository.findByCpf(normalizedCpf)
     if (existing) {
       throw new UserExists()
     }
 
-    if (dto.roles.includes("DOCENTE") && !dto.docenteProfile) {
+    if (dto.roles.includes("DOCENTE" as RoleName) && !dto.docenteProfile) {
       if (typeof DocenteProfileRequired !== "undefined") {
         throw new DocenteProfileRequired()
       }
@@ -123,14 +141,16 @@ export class UserService {
       const created = await this.userRepository.createWithRolesAndDocente({
         name: dto.name,
         email: dto.email,
-        cpf: dto.cpf,
+        phone: dto.phone ?? null,
+        cpf: normalizedCpf,                  // ✅ cpf só com dígitos
+        city: dto.city ?? null,              // ✅ novo
+        uf: dto.uf ?? null,                  // ✅ novo
         passwordHash,
         roles: dto.roles,
         docenteProfile: dto.docenteProfile
           ? {
               siape: dto.docenteProfile.siape,
-              class: dto.docenteProfile.class,
-              level: dto.docenteProfile.level,
+              classLevel: dto.docenteProfile.classLevel,
               startInterstice: dto.docenteProfile.startInterstice,
               educationLevel: dto.docenteProfile.educationLevel,
               improvement: dto.docenteProfile.improvement ?? null,
@@ -155,7 +175,7 @@ export class UserService {
     }
   }
 
-   async getUserById(userId: number): Promise<UserResponseDto> {
+  async getUserById(userId: number): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(userId)
     if (!user) throw new UserNotFound()
     return this.toResponse(user)
@@ -183,24 +203,27 @@ export class UserService {
       const p = dto.docenteProfile
       const missing: string[] = []
       if (!p.siape) missing.push("siape")
-      if (!p.class) missing.push("class")
-      if (!p.level) missing.push("level")
+      if (!p.classLevel) missing.push("classLevel")
       if (!p.startInterstice) missing.push("startInterstice")
       if (!p.educationLevel) missing.push("educationLevel")
       if (missing.length) throw new Error(`Campos obrigatórios para criar DocenteProfile ausentes: ${missing.join(", ")}`)
     }
 
+    const normalizedCpf = dto.cpf ? normalizeCpf(dto.cpf) : undefined
+
     const updated = await this.userRepository.updateWithRolesAndDocente(userId, {
       name: dto.name,
       email: dto.email,
-      cpf: dto.cpf,
+      phone: dto.phone ?? undefined,
+      cpf: normalizedCpf,
+      city: dto.city ?? undefined,    // ✅ novo
+      uf: dto.uf ?? undefined,        // ✅ novo
       active: dto.active,
       roles: dto.roles as RoleName[] | undefined,
       docenteProfile: dto.docenteProfile
         ? {
             siape: dto.docenteProfile.siape,
-            class: dto.docenteProfile.class,
-            level: dto.docenteProfile.level,
+            classLevel: dto.docenteProfile.classLevel as ClassLevel | undefined,
             startInterstice: dto.docenteProfile.startInterstice,
             educationLevel: dto.docenteProfile.educationLevel,
             improvement: dto.docenteProfile.improvement ?? null,
@@ -234,8 +257,7 @@ export class UserService {
       ? {
           idDocente: user.docente.idDocente,
           siape: user.docente.siape,
-          class: user.docente.class,
-          level: user.docente.level,
+          classLevel: user.docente.classLevel as ClassLevel,
           startInterstice: user.docente.start_interstice,
           educationLevel: user.docente.educationLevel,
           improvement: user.docente.improvement ?? null,
@@ -254,7 +276,10 @@ export class UserService {
       idUser: user.idUser,
       name: user.name,
       email: user.email,
+      phone: user.phone ?? null,
       cpf: user.cpf,
+      city: user.city ?? null,   // ✅ novo
+      uf: user.uf ?? null,       // ✅ novo
       active: Boolean(user.active),
       createdAt: user.createdAt,
       deletedDate: user.deletedDate ?? null,

@@ -18,6 +18,9 @@ model User {
   idUser       Int       @id @default(autoincrement())
   name         String    @db.VarChar(120)
   email        String    @unique @db.VarChar(180)
+  phone        String?   @db.VarChar(20)
+  city         String?
+  uf           String?
   cpf          String    @unique @db.VarChar(14)
   passwordHash String    @db.VarChar(200)
   active       Boolean   @default(true)
@@ -29,6 +32,7 @@ model User {
   docente              DocenteProfile?
   CareerProcess        CareerProcess[]
   ProcessStatusHistory ProcessStatusHistory[]
+  evidenceFiles        EvidenceFile[]
 
   @@map("user")
 }
@@ -61,28 +65,40 @@ model UserRole {
 
 //tabela com dados específicos do docente, para permitir perfil de docente e membro da CPPD
 model DocenteProfile {
-  idDocente            Int       @id @default(autoincrement())
-  userId               Int       @unique
-  siape                String    @db.VarChar(30)
-  class                String    @db.VarChar(60)
-  level                String    @db.VarChar(60)
+  idDocente            Int        @id @default(autoincrement())
+  userId               Int        @unique
+  siape                String     @db.VarChar(30)
+  classLevel           ClassLevel
   start_interstice     DateTime //data do início do interstício atual
-  educationLevel       String    @db.VarChar(120)
-  improvement          String?   @db.VarChar(120)
-  specialization       String?   @db.VarChar(120)
-  mastersDegree        String?   @db.VarChar(120)
-  doctorate            String?   @db.VarChar(120)
-  assignment           String?   @db.VarChar(120)
-  department           String?   @db.VarChar(120)
-  division             String?   @db.VarChar(120)
-  role                 String?   @db.VarChar(120)
-  immediate_supervisor String?   @db.VarChar(120)
-  user                 User      @relation(fields: [userId], references: [idUser], onDelete: Cascade)
-  createdAt            DateTime  @default(now())
+  educationLevel       String     @db.VarChar(120)
+  improvement          String?    @db.VarChar(120)
+  specialization       String?    @db.VarChar(120)
+  mastersDegree        String?    @db.VarChar(120)
+  doctorate            String?    @db.VarChar(120)
+  assignment           String?    @db.VarChar(120)
+  department           String?    @db.VarChar(120)
+  division             String?    @db.VarChar(120)
+  role                 String?    @db.VarChar(120)
+  immediate_supervisor String?    @db.VarChar(120)
+  user                 User       @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+  createdAt            DateTime   @default(now())
   deletedDate          DateTime?
-  updatedAt            DateTime  @updatedAt
+  updatedAt            DateTime   @updatedAt
 
   @@map("docente_profile")
+}
+
+enum ClassLevel {
+  A1
+  B1
+  B2
+  B3
+  B4
+  C1
+  C2
+  C3
+  C4
+  D1
 }
 
 model ScoringTable {
@@ -133,6 +149,7 @@ model ScoringItem {
   points         Decimal   @db.Decimal(10, 2)
   unit           String?   @db.VarChar(30)
   hasMaxPoints   Boolean   @default(false)
+  maxPoints      Decimal?  @db.Decimal(10, 2)
   active         Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -161,15 +178,23 @@ enum ProcessStatus {
 }
 
 model CareerProcess {
-  idProcess      Int           @id @default(autoincrement())
-  userId         Int
-  scoringTableId Int //TABELA VIGENTE “fixada” no momento da abertura
-  type           ProcessType
-  status         ProcessStatus @default(DRAFT)
-  submittedAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deletedDate    DateTime?
+  idProcess       Int           @id @default(autoincrement())
+  userId          Int
+  scoringTableId  Int //TABELA VIGENTE “fixada” no momento da abertura
+  type            ProcessType
+  status          ProcessStatus @default(DRAFT)
+  submittedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedDate     DateTime?
+  campus          String        @db.VarChar(255)
+  cidadeUF        String        @db.VarChar(255)
+  intersticeStart DateTime
+  intersticeEnd   DateTime
+  classeOrigem    String        @db.VarChar(20)
+  nivelOrigem     String        @db.VarChar(20)
+  classeDestino   String        @db.VarChar(20)
+  nivelDestino    String        @db.VarChar(20)
 
   user  User         @relation(fields: [userId], references: [idUser], onDelete: Restrict)
   table ScoringTable @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Restrict)
@@ -187,18 +212,20 @@ model ProcessScore {
   processId      Int
   itemId         Int
 
-  quantity      Int     @default(0) //para itens “por unidade”
-  awardedPoints Decimal @db.Decimal(10, 2) //pontos efetivamente computados
+  quantity      Int     @default(0)
+  awardedPoints Decimal @db.Decimal(10, 2)
+
+  evidenceFileId Int?
+  evidenceFile   EvidenceFile? @relation(fields: [evidenceFileId], references: [idEvidenceFile], onDelete: Restrict)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedDate DateTime?
 
-  process       CareerProcess   @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
-  item          ScoringItem     @relation(fields: [itemId], references: [idScoringItem], onDelete: Restrict)
-  ScoreEvidence ScoreEvidence[]
+  process CareerProcess @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
+  item    ScoringItem   @relation(fields: [itemId], references: [idScoringItem], onDelete: Restrict)
 
-  @@unique([processId, itemId]) //1 linha por item no processo
+  @@unique([processId, itemId])
   @@index([itemId])
   @@map("process_score")
 }
@@ -221,10 +248,11 @@ model ProcessStatusHistory {
   @@map("process_status_history")
 }
 
-model ScoreEvidence {
-  idEvidence     Int       @id @default(autoincrement())
-  processScoreId Int
-  filename       String    @db.VarChar(180)
+model EvidenceFile {
+  idEvidenceFile Int       @id @default(autoincrement())
+  userId         Int
+  originalName   String    @db.VarChar(180)
+  storedName     String    @db.VarChar(180)
   url            String    @db.VarChar(500)
   mimeType       String?   @db.VarChar(60)
   sizeBytes      BigInt?
@@ -233,8 +261,9 @@ model ScoreEvidence {
   updatedAt      DateTime  @updatedAt
   deletedDate    DateTime?
 
-  score ProcessScore @relation(fields: [processScoreId], references: [idProcessScore], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [idUser], onDelete: Cascade)
+  scores ProcessScore[]
 
-  @@index([processScoreId])
-  @@map("score_evidence")
+  @@index([userId, deletedDate])
+  @@map("evidence_file")
 }

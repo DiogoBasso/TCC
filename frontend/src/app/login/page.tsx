@@ -46,20 +46,20 @@ export default function LoginPage() {
       needsProfileSelection?: boolean
     }
 
-    if (data?.needsProfileSelection) {
+    if (data.needsProfileSelection) {
       sessionStorage.setItem("roles", JSON.stringify(data.roles ?? []))
       sessionStorage.setItem("selectedRole", JSON.stringify(data.selectedRole ?? null))
       router.push("/select-role")
       return
     }
 
-    if (data?.selectedRole) {
+    if (data.selectedRole) {
       router.push(pathForRole(data.selectedRole))
       return
     }
 
-    if (Array.isArray(data?.roles) && data.roles!.length === 1) {
-      router.push(pathForRole(data.roles![0]))
+    if (Array.isArray(data.roles) && data.roles.length === 1) {
+      router.push(pathForRole(data.roles[0]))
       return
     }
 
@@ -67,40 +67,101 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <form onSubmit={onSubmit} className="w-full max-w-sm bg-white p-6 rounded-2xl shadow">
-        <h1 className="text-2xl font-semibold mb-4">Entrar</h1>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--surface-muted)] p-4">
 
-        <label className="block text-sm mb-1">CPF</label>
-        <input
-          className="w-full border rounded-xl p-2 mb-3 outline-none focus:ring"
-          value={cpf}
-          onChange={e => setCpf(e.target.value)}
-          placeholder="000.000.000-00"
-        />
+      {/* NOME DO SISTEMA FORA DO CARD */}
+      <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-6 text-center">
+        Nome Do Sistema
+      </h1>
 
-        <label className="block text-sm mb-1">Senha</label>
-        <input
-          className="w-full border rounded-xl p-2 outline-none focus:ring"
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="••••••••"
-        />
+      <form
+        onSubmit={onSubmit}
+        className="
+          w-full max-w-sm
+          bg-[var(--surface-card)]
+          border border-[var(--border-subtle)]
+          rounded-2xl shadow-sm
+          p-6 space-y-5
+        "
+      >
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+          Entrar
+        </h2>
 
-        {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
+        {/* CPF */}
+        <div className="space-y-1">
+          <label className="block text-sm text-[var(--text-secondary)]">
+            CPF
+          </label>
+          <input
+            value={cpf}
+            onChange={e => setCpf(e.target.value)}
+            placeholder="000.000.000-00"
+            className="
+              w-full border border-[var(--border-subtle)]
+              rounded-xl px-3 py-2 text-sm
+              bg-[var(--surface-card)]
+              text-[var(--text-primary)]
+              placeholder:text-[var(--text-secondary)]
+              outline-none
+              focus:ring-2 focus:ring-[var(--brand)]
+            "
+          />
+        </div>
 
+        {/* SENHA */}
+        <div className="space-y-1">
+          <label className="block text-sm text-[var(--text-secondary)]">
+            Senha
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="
+              w-full border border-[var(--border-subtle)]
+              rounded-xl px-3 py-2 text-sm
+              bg-[var(--surface-card)]
+              text-[var(--text-primary)]
+              placeholder:text-[var(--text-secondary)]
+              outline-none
+              focus:ring-2 focus:ring-[var(--brand)]
+            "
+          />
+        </div>
+
+        {/* ERRO */}
+        {error && (
+          <p className="text-red-600 text-sm bg-red-50 border border-red-200 p-2 rounded-xl">
+            {error}
+          </p>
+        )}
+
+        {/* BOTÃO */}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-xl bg-black text-white py-2 mt-4 disabled:opacity-50"
+          className="
+            w-full rounded-xl px-4 py-2 text-sm font-medium
+            bg-[var(--btn-primary-bg)]
+            text-[var(--btn-primary-text)]
+            hover:bg-[var(--btn-primary-hover-bg)]
+            disabled:opacity-50
+          "
         >
           {loading ? "Entrando..." : "Entrar"}
         </button>
 
-        <div className="mt-4 text-center">
-          <span className="text-sm text-gray-600">Não tem conta?</span>{" "}
-          <a href="/register-professor" className="text-sm text-blue-600 hover:underline">
+        {/* CADASTRO */}
+        <div className="pt-2 text-center">
+          <span className="text-sm text-[var(--text-secondary)]">
+            Não tem conta?
+          </span>{" "}
+          <a
+            href="/register-professor"
+            className="text-sm text-[var(--brand)] hover:underline"
+          >
             Cadastre-se
           </a>
         </div>

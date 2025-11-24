@@ -12,7 +12,7 @@ import * as tokenGen from "../../../src/util/generateToken"
 import * as tokenDecode from "../../../src/util/decodeToken"
 import * as blacklist from "../../../src/util/tokenBlacklist"
 
-// mock do módulo bcrypt (sem genéricos inline)
+// mock do módulo bcrypt
 jest.mock("bcryptjs", () => {
   return {
     compare: jest.fn(),
@@ -20,10 +20,8 @@ jest.mock("bcryptjs", () => {
   }
 })
 
-// helpers de tipagem para o mock do bcrypt
 type CompareFn = (data: string | Buffer, encrypted: string) => Promise<boolean>
 type HashFn = (data: string | Buffer, saltOrRounds: string | number) => Promise<string>
-
 const bcryptMock = bcrypt as unknown as {
   compare: jest.MockedFunction<CompareFn>
   hash: jest.MockedFunction<HashFn>
@@ -40,6 +38,7 @@ describe("UserService", () => {
     email: "fulano@if.edu.br",
     cpf: "11122233344",
     passwordHash: "hashed",
+    phone: "(11) 99888-7766", // 👈 phone no mock
     active: true,
     createdAt: now,
     deletedDate: null,
@@ -64,10 +63,8 @@ describe("UserService", () => {
   }
 
   beforeEach(() => {
-    // primeiro limpar
     jest.clearAllMocks()
 
-    // mock do repositório
     repo = {
       findByCpf: jest.fn(),
       findById: jest.fn(),
@@ -79,7 +76,6 @@ describe("UserService", () => {
 
     service = new UserService(repo)
 
-    // spies de utilitários
     jest.spyOn(tokenGen, "generateAccessToken").mockReturnValue("access")
     jest.spyOn(tokenGen, "generateRefreshToken").mockReturnValue("refresh")
     jest.spyOn(tokenDecode, "decodeRefreshToken").mockReturnValue({ userId: dbUser.idUser, selectedRole: RoleName.ADMIN })
@@ -88,16 +84,17 @@ describe("UserService", () => {
     process.env.JWT_ACCESS_EXPIRATION = "3600s"
     process.env.JWT_REFRESH_EXPIRATION = "7d"
 
-    // valores padrão para os mocks do bcrypt
     bcryptMock.compare.mockResolvedValue(true)
     bcryptMock.hash.mockResolvedValue("hashedpwd")
   })
 
+  // 👇 Atualizado para incluir phone no DTO esperado
   const mapResponse = (u: any) => ({
     idUser: u.idUser,
     name: u.name,
     email: u.email,
     cpf: u.cpf,
+    phone: u.phone ?? null, // 👈 incluir phone
     active: Boolean(u.active),
     createdAt: u.createdAt,
     deletedDate: u.deletedDate ?? null,
@@ -249,6 +246,7 @@ describe("UserService", () => {
         email: "b",
         cpf: dbUser.cpf,
         password: "123",
+        phone: "(11) 90000-0000", // 👈 incluir phone
         roles: [RoleName.ADMIN]
       } as any)).rejects.toThrow(UserExists)
     })
@@ -261,6 +259,7 @@ describe("UserService", () => {
         email: "b",
         cpf: "000",
         password: "123",
+        phone: "(11) 90000-0000", // 👈 incluir phone
         roles: [RoleName.DOCENTE]
       } as any)).rejects.toThrow(DocenteProfileRequired)
     })
@@ -275,12 +274,13 @@ describe("UserService", () => {
         email: "b",
         cpf: "000",
         password: "123",
+        phone: "(11) 90000-0000", // 👈 incluir phone
         roles: [RoleName.ADMIN],
         docenteProfile: undefined
       } as any)).rejects.toThrow(UserExists)
     })
 
-    test("cria usuário com docenteProfile e retorna DTO mapeado", async () => {
+    test("cria usuário com docenteProfile e retorna DTO mapeado (inclui phone)", async () => {
       repo.findByCpf.mockResolvedValue(null)
       bcryptMock.hash.mockResolvedValue("hash")
       repo.createWithRolesAndDocente.mockResolvedValue(dbUser as any)
@@ -290,6 +290,7 @@ describe("UserService", () => {
         email: dbUser.email,
         cpf: dbUser.cpf,
         password: "123",
+        phone: dbUser.phone, // 👈 incluir phone
         roles: [RoleName.ADMIN, RoleName.DOCENTE],
         docenteProfile: {
           siape: "1234567",
@@ -307,6 +308,7 @@ describe("UserService", () => {
         email: dto.email,
         cpf: dto.cpf,
         passwordHash: "hash",
+        phone: dto.phone, // 👈 verificação
         roles: dto.roles,
         docenteProfile: expect.objectContaining({
           siape: "1234567",
@@ -324,7 +326,7 @@ describe("UserService", () => {
       await expect(service.getUserById(999)).rejects.toThrow(UserNotFound)
     })
 
-    test("retorna DTO mapeado", async () => {
+    test("retorna DTO mapeado (inclui phone)", async () => {
       repo.findById.mockResolvedValue(dbUser as any)
       const out = await service.getUserById(dbUser.idUser)
       expect(out).toEqual(mapResponse(dbUser))
@@ -388,6 +390,7 @@ describe("UserService", () => {
           email: undefined,
           cpf: undefined,
           active: undefined,
+          phone: undefined, // 👈 permanece undefined se não veio no DTO
           roles: undefined,
           docenteProfile: undefined
         }

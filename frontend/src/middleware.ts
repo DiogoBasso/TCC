@@ -7,8 +7,12 @@ function decodeJwtPayload(token: string): any | null {
   try {
     const parts = token.split(".")
     if (parts.length !== 3) return null
+
     const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/")
-    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, "=")
+    const padded = base64.padEnd(
+      base64.length + (4 - (base64.length % 4)) % 4,
+      "="
+    )
     const json = atob(padded)
     return JSON.parse(json)
   } catch {
@@ -16,64 +20,76 @@ function decodeJwtPayload(token: string): any | null {
   }
 }
 
-function requiredRoleForPath(pathname: string): Role | null {
-  if (pathname.startsWith("/professor")) return "DOCENTE"
-  if (pathname.startsWith("/cppd")) return "CPPD_MEMBER"
-  return null
+function redirectToLogin(req: NextRequest, reason: string) {
+  const url = req.nextUrl.clone()
+  url.pathname = "/login"
+  url.searchParams.set("reason", reason)
+  return NextResponse.redirect(url)
+}
+
+function redirectToForbidden(req: NextRequest) {
+  const url = req.nextUrl.clone()
+  url.pathname = "/forbidden"
+  url.searchParams.delete("reason")
+  return NextResponse.redirect(url)
 }
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // 🔓 libera rotas públicas
-  if (
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/register-professor") ||
-    pathname.startsWith("/api/public/") ||
-    pathname.startsWith("/_next/") ||
-    pathname.startsWith("/favicon") ||
-    pathname === "/"
-  ) {
-    return NextResponse.next()
+  // só intercepta as rotas que nos interessam (definidas no config.matcher)
+  const accessToken = req.cookies.get("accessToken")?.value
+
+  if (!accessToken) {
+    return redirectToLogin(req, "no_token")
   }
 
-  const access = req.cookies.get("accessToken")?.value
-
-  // 🚫 se não tiver login, redireciona sempre para /login
-  if (!access) {
-    // inclui /forbidden aqui também — não abre sem login
-    const url = new URL("/login", req.url)
-    return NextResponse.redirect(url)
+  const payload = decodeJwtPayload(accessToken)
+  if (!payload) {
+    return redirectToLogin(req, "invalid_token")
   }
 
-  // 🔒 se tentar acessar /forbidden sem estar autenticado, bloqueia
-  if (pathname.startsWith("/forbidden") && !access) {
-    const url = new URL("/login", req.url)
-    return NextResponse.redirect(url)
+  const now = Math.floor(Date.now() / 1000)
+  if (typeof payload.exp === "number" && payload.exp < now) {
+    return redirectToLogin(req, "expired")
   }
 
-  // 🔐 verifica roles quando necessário
-  const must = requiredRoleForPath(pathname)
-  if (must) {
-    const payload = decodeJwtPayload(access)
-    const roles: string[] = Array.isArray(payload?.roles) ? payload.roles : []
-    const hasRole = roles.includes(must)
+  const roles: Role[] = Array.isArray(payload.roles) ? payload.roles : []
+  const selectedRole: Role | null = payload.selectedRole ?? null
 
-    if (!hasRole) {
-      const url = new URL("/forbidden", req.url)
-      return NextResponse.redirect(url)
+  const hasRole = (role: Role) => roles.includes(role)
+
+  // regras de permissão por módulo
+  if (pathname.startsWith("/docente")) {
+    if (!hasRole("DOCENTE")) return redirectToForbidden(req)
+    if (selectedRole && selectedRole !== "DOCENTE") {
+      return redirectToForbidden(req)
     }
   }
 
+  if (pathname.startsWith("/cppd")) {
+    if (!hasRole("CPPD_MEMBER")) return redirectToForbidden(req)
+    if (selectedRole && selectedRole !== "CPPD_MEMBER") {
+      return redirectToForbidden(req)
+    }
+  }
+
+  if (pathname.startsWith("/dashboard")) {
+    if (!hasRole("ADMIN")) {
+      return redirectToForbidden(req)
+    }
+  }
+
+  // /forbidden só precisa de usuário logado (já checamos token)
   return NextResponse.next()
 }
 
-// 🧭 Define rotas protegidas
+// 🧭 Rotas protegidas
 export const config = {
   matcher: [
     "/dashboard/:path*",
-    "/professor/:path*",
+    "/docente/:path*",
     "/cppd/:path*",
-    "/forbidden/:path*" // adiciona pra validar o acesso à forbidden também
+    "/forbidden/:path*"
   ]
 }

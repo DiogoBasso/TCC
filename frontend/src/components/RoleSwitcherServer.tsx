@@ -23,9 +23,19 @@ export default async function RoleSwitcherServer() {
   const roles: Role[] = Array.isArray(payload?.roles) ? payload.roles : []
   const selectedRole: Role | null = payload?.selectedRole ?? null
 
-  // só renderiza se houver pelo menos duas roles no conjunto {DOCENTE, CPPD_MEMBER}
-  const countDocenteCppd = roles.filter(r => r === "DOCENTE" || r === "CPPD_MEMBER").length
-  if (countDocenteCppd < 2) return null
+  const docenteOuCppd = roles.filter(
+    r => r === "DOCENTE" || r === "CPPD_MEMBER"
+  )
 
-  return <RoleSwitcherClient roles={roles} selectedRole={selectedRole} />
+  if (docenteOuCppd.length < 2) return null
+
+  return (
+    <div className="mt-1 px-4 pt-2 border-t border-[var(--gray-800)] text-xs">
+      <p className="mb-2 font-semibold uppercase tracking-wide text-[var(--navbar-text-muted)]">
+        Alternar módulo
+      </p>
+
+      <RoleSwitcherClient roles={roles} selectedRole={selectedRole} />
+    </div>
+  )
 }

@@ -5,82 +5,87 @@ import RoleDropdown from "@/components/ui/RoleDropdown"
 
 type Role = "DOCENTE" | "CPPD_MEMBER" | "ADMIN"
 
-function pathForRole(role: Role | null | undefined) {
-  if (role === "DOCENTE") return "/professor"
-  if (role === "CPPD_MEMBER") return "/cppd"
-  if (role === "ADMIN") return "/dashboard"
-  return "/dashboard"
+type Props = {
+  roles: Role[]
+  selectedRole: Role | null
 }
 
 const ROLE_LABEL: Record<Role, string> = {
   DOCENTE: "Docente",
-  CPPD_MEMBER: "CPPD",
-  ADMIN: "Admin"
+  CPPD_MEMBER: "Membro da CPPD",
+  ADMIN: "Administrador"
 }
 
-export default function RoleSwitcherClient(props: { roles: Role[]; selectedRole: Role | null }) {
-  const { roles, selectedRole } = props
-  const [value, setValue] = useState<Role | "">((selectedRole ?? "") as any)
+export default function RoleSwitcherClient({ roles, selectedRole }: Props) {
+  const [value, setValue] = useState<Role | null>(selectedRole)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Apenas DOCENTE e CPPD (ignora ADMIN para o switch)
-  const options = useMemo(() => {
-    const filtered = roles.filter((r): r is Exclude<Role, "ADMIN"> => r === "DOCENTE" || r === "CPPD_MEMBER")
-    const unique = Array.from(new Set(filtered)) as Role[]
-    return unique.map(r => ({ value: r, label: ROLE_LABEL[r] }))
-  }, [roles])
+  const options = useMemo(
+    () =>
+      roles
+        .filter(r => r === "DOCENTE" || r === "CPPD_MEMBER")
+        .map(r => ({ value: r, label: ROLE_LABEL[r] })),
+    [roles]
+  )
 
-  // Exibe só se houver pelo menos duas opções (Docente e CPPD)
-  if (options.length < 2) return null
+  async function switchTo(role: Role | null) {
+    if (!role) return
 
-  async function switchTo(nextRole: Role) {
-    if (nextRole === selectedRole) return
-    setError(null)
-    setLoading(true)
     try {
-      const r = await fetch("/api/auth/select-role", {
+      setLoading(true)
+      setError(null)
+
+      const res = await fetch("/api/auth/select-role", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ role: nextRole }),
-        cache: "no-store"
+        cache: "no-store",
+        body: JSON.stringify({ role })
       })
-      if (!r.ok) {
-        const err = await r.json().catch(() => ({}))
-        setError(err?.message ?? "Não foi possível alternar o papel agora.")
-        setValue((selectedRole ?? "") as any)
-        return
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "")
+        throw new Error(text || "Não foi possível trocar de módulo.")
       }
-      window.location.href = pathForRole(nextRole)
-    } catch (e: any) {
-      setError("Falha de conexão ao alternar papel.")
-      setValue((selectedRole ?? "") as any)
+
+      const data = await res.json().catch(() => null)
+      const nextRole = (data?.selectedRole as Role | null) ?? role
+
+      if (nextRole === "DOCENTE") {
+        window.location.href = "/docente"
+      } else if (nextRole === "CPPD_MEMBER") {
+        window.location.href = "/cppd"
+      } else {
+        window.location.href = "/dashboard"
+      }
+    } catch (err: any) {
+      setError(err?.message || "Erro ao trocar de módulo.")
     } finally {
       setLoading(false)
     }
   }
 
+  if (options.length < 2) return null
+
   return (
-    <div className="inline-flex flex-col">
-      <div className="inline-flex items-center gap-2">
-        <label htmlFor="role-switcher" className="text-sm text-gray-600">
-          Módulo:
-        </label>
-
-        <RoleDropdown
-          id="role-switcher"
-          value={(value as string) || null}
-          options={options}
-          disabled={loading}
-          onChange={(val) => {
-            setValue(val as Role)
-            switchTo(val as Role)
-          }}
-        />
-      </div>
-
-      {error && <span className="mt-1 text-xs text-red-600">{error}</span>}
+    <div className="flex flex-col gap-1 text-xs text-[var(--navbar-text)]">
+      <RoleDropdown
+        value={value}
+        options={options}
+        disabled={loading}
+        placeholder="Selecionar módulo"
+        onChange={val => {
+          const r = val as Role
+          setValue(r)
+          switchTo(r)
+        }}
+      />
+      {error && (
+        <span className="mt-1 text-[11px] text-[var(--danger-text)]">
+          {error}
+        </span>
+      )}
     </div>
   )
 }

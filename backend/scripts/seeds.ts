@@ -1,9 +1,10 @@
-import { PrismaClient, RoleName } from "@prisma/client"
+import { PrismaClient, RoleName, ClassLevel } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
 const prisma = new PrismaClient()
 
 async function main() {
+  // Roles base do sistema
   await prisma.role.createMany({
     data: [
       { name: RoleName.ADMIN },
@@ -13,6 +14,7 @@ async function main() {
     skipDuplicates: true
   })
 
+  // Usuário admin
   const adminPasswordHash = await bcrypt.hash(
     process.env.SEED_ADMIN_PASSWORD ?? "Admin@123456",
     10
@@ -33,6 +35,7 @@ async function main() {
     }
   })
 
+  // Usuária Marina (DOCENTE + CPPD_MEMBER)
   const marinaPasswordHash = await bcrypt.hash("senhaSegura123", 10)
 
   await prisma.user.upsert({
@@ -53,8 +56,7 @@ async function main() {
       docente: {
         create: {
           siape: "1234567",
-          class: "D",
-          level: "III",
+          classLevel: ClassLevel.D1,
           start_interstice: new Date("2023-03-01T00:00:00.000Z"),
           educationLevel: "Mestrado",
           improvement: "Aperfeiçoamento em Metodologias de Ensino",
@@ -172,7 +174,7 @@ async function createItem(
 }
 
 main()
-  .catch((e) => {
+  .catch(e => {
     console.error("Seed failed:", e)
     process.exit(1)
   })

@@ -25,7 +25,7 @@ export default function ConfirmModal({
 }: Props) {
   const cancelRef = useRef<HTMLButtonElement | null>(null)
 
-  // Foco no botão cancelar ao abrir (acessibilidade)
+  // foco no cancelar ao abrir
   useEffect(() => {
     if (open) {
       const t = setTimeout(() => cancelRef.current?.focus(), 0)
@@ -33,7 +33,7 @@ export default function ConfirmModal({
     }
   }, [open])
 
-  // Fechar com ESC
+  // ESC fecha
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!open) return
@@ -46,13 +46,8 @@ export default function ConfirmModal({
   if (!open) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
-    >
-      {/* Backdrop */}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      {/* Backdrop opaco */}
       <div
         className="absolute inset-0 bg-black/40"
         onClick={onCancel}
@@ -60,29 +55,56 @@ export default function ConfirmModal({
       />
 
       {/* Card */}
-      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-xl p-6">
-        <h2 id="confirm-title" className="text-lg font-semibold">
+      <div
+        className="
+          relative z-[101] w-full max-w-md
+          rounded-2xl border border-gray-200
+          bg-white text-gray-900 shadow-2xl px-6 py-5
+        "
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+      >
+        <h2
+          id="confirm-title"
+          className="text-lg font-semibold"
+        >
           {title}
         </h2>
+
         {description && (
-          <p className="text-sm text-gray-600 mt-2">{description}</p>
+          <p className="mt-2 text-sm text-gray-600">
+            {description}
+          </p>
         )}
 
         <div className="mt-6 flex justify-end gap-3">
           <button
             ref={cancelRef}
             type="button"
-            className="px-4 py-2 rounded-xl border hover:bg-gray-50"
             onClick={onCancel}
             disabled={loading}
+            className="
+              px-4 py-2 rounded-xl text-sm
+              border border-gray-300
+              bg-white text-gray-800
+              hover:bg-gray-50
+              disabled:opacity-60
+            "
           >
             {cancelText}
           </button>
+
           <button
             type="button"
-            className="px-4 py-2 rounded-xl bg-black text-white hover:opacity-90 disabled:opacity-60"
             onClick={onConfirm}
             disabled={loading}
+            className="
+              px-4 py-2 rounded-xl text-sm font-medium
+              bg-black text-white
+              hover:opacity-90
+              disabled:opacity-60
+            "
           >
             {loading ? "Confirmando..." : confirmText}
           </button>

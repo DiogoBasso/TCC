@@ -36,25 +36,30 @@ export default function HeaderActionsClient(props: { roles: Role[]; selectedRole
 
   // Opções apenas Docente/CPPD (ignora ADMIN)
   const options = useMemo(() => {
-    const filtered = roles.filter((r): r is Exclude<Role, "ADMIN"> => r === "DOCENTE" || r === "CPPD_MEMBER")
+    const filtered = roles.filter(
+      (r): r is Exclude<Role, "ADMIN"> => r === "DOCENTE" || r === "CPPD_MEMBER"
+    )
     const unique = Array.from(new Set(filtered)) as Role[]
     return unique.map(r => ({ value: r, label: ROLE_LABEL[r] }))
   }, [roles])
 
   // Ao escolher no dropdown, NÃO troca imediatamente — abre o modal de confirmação
-  const onDropdownChange = useCallback((val: string) => {
-    const next = val as Role
-    // Se for o mesmo papel, ignora
-    if (next === selectedRole) {
+  const onDropdownChange = useCallback(
+    (val: string) => {
+      const next = val as Role
+      // Se for o mesmo papel, ignora
+      if (next === selectedRole) {
+        setValue(next)
+        return
+      }
+      // Atualiza visualmente e prepara confirmação
       setValue(next)
-      return
-    }
-    // Atualiza visualmente e prepara confirmação
-    setValue(next)
-    setPendingRole(next)
-    setErr(null)
-    setModalOpen(true)
-  }, [selectedRole])
+      setPendingRole(next)
+      setErr(null)
+      setModalOpen(true)
+    },
+    [selectedRole]
+  )
 
   // Confirmar troca
   const confirmSwitch = useCallback(async () => {
@@ -119,7 +124,10 @@ export default function HeaderActionsClient(props: { roles: Role[]; selectedRole
         {options.length >= 2 && (
           <div className="inline-flex flex-col">
             <div className="inline-flex items-center gap-2">
-              <label htmlFor="role-switcher" className="text-sm text-gray-600">
+              <label
+                htmlFor="role-switcher"
+                className="text-sm text-[var(--navbar-text-muted)]"
+              >
                 Módulo:
               </label>
               <RoleDropdown
@@ -130,7 +138,7 @@ export default function HeaderActionsClient(props: { roles: Role[]; selectedRole
                 onChange={onDropdownChange}
               />
             </div>
-            {err && <span className="mt-1 text-xs text-red-600">{err}</span>}
+            {err && <span className="mt-1 text-xs text-red-400">{err}</span>}
           </div>
         )}
 
@@ -138,7 +146,13 @@ export default function HeaderActionsClient(props: { roles: Role[]; selectedRole
           type="button"
           onClick={handleLogout}
           disabled={loggingOut}
-          className="px-3 py-2 bg-black text-white rounded-xl hover:opacity-80 disabled:opacity-60"
+          className="
+            px-3 py-2 rounded-xl text-xs font-semibold uppercase tracking-wide
+            bg-[var(--btn-primary-bg)]
+            text-[var(--btn-primary-text)]
+            hover:bg-[var(--btn-primary-hover-bg)]
+            disabled:opacity-60
+          "
           title="Sair"
         >
           {loggingOut ? "Saindo..." : "Sair"}
