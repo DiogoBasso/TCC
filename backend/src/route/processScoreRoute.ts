@@ -5,6 +5,7 @@ import { ProcessRepository } from "../repository/processoRepository"
 import { ScoringTableRepository } from "../repository/scoringTableRepository"
 import { ProcessScoreRepository } from "../repository/processScoreRepository"
 import { EvidenceFileRepository } from "../repository/evidenceFileRepository"
+import { ProcessNodeScoreRepository } from "../repository/processNodeScoreRepository"
 
 export function processScoreRoute() {
   const router = Router()
@@ -14,7 +15,8 @@ export function processScoreRoute() {
       new ProcessRepository(),
       new ScoringTableRepository(),
       new ProcessScoreRepository(),
-      new EvidenceFileRepository()
+      new EvidenceFileRepository(),
+      new ProcessNodeScoreRepository()
     )
   )
 

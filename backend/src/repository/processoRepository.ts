@@ -50,6 +50,21 @@ export class ProcessRepository {
     })
   }
 
+  async updateStatus(idProcess: number, status: ProcessStatus) {
+    return prisma.careerProcess.update({
+      where: {
+        idProcess
+      },
+      data: {
+        status
+      },
+      include: {
+        user: true,
+        table: true
+      }
+    })
+  }
+
   /**
    * Verifica se o usuário já possui ALGUM processo em andamento
    * (progressão ou promoção) que ainda não foi aprovado nem excluído.

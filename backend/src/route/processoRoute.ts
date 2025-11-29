@@ -37,5 +37,7 @@ export function processoRoute() {
   // router.get("/processos/requerimento/:id", controller.gerarRequerimento)
   router.post("/processos/requerimento/:id", controller.gerarRequerimento)
 
+  router.post("/processos/:id/enviar", controller.enviarProcesso)
+
   return router
 }

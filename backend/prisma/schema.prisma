@@ -118,24 +118,24 @@ model ScoringTable {
 }
 
 model ScoringNode {
-  idScoringNode  Int       @id @default(autoincrement())
-  scoringTableId Int
-  parentId       Int?
-  name           String    @db.VarChar(150)
-  code           String?   @db.VarChar(50) //código opcional para referência externa ex: "A1", "B2.1"
-  sortOrder      Int       @default(0)
-  active         Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedDate    DateTime?
+  idScoringNode     Int                @id @default(autoincrement())
+  scoringTableId    Int
+  parentId          Int?
+  name              String             @db.VarChar(150)
+  code              String?            @db.VarChar(50)
+  sortOrder         Int                @default(0)
+  active            Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedDate       DateTime?
+  hasFormula        Boolean            @default(false)
+  formulaExpression String?            @db.VarChar(255)
+  table             ScoringTable       @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
+  parent            ScoringNode?       @relation("NodeChildren", fields: [parentId], references: [idScoringNode], onDelete: Cascade)
+  children          ScoringNode[]      @relation("NodeChildren")
+  items             ScoringItem[]
+  nodeScores        ProcessNodeScore[] // relação com a tabela nova
 
-  table    ScoringTable  @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
-  parent   ScoringNode?  @relation("NodeChildren", fields: [parentId], references: [idScoringNode], onDelete: Cascade)
-  children ScoringNode[] @relation("NodeChildren")
-
-  items ScoringItem[]
-
-  //evita duplicar nomes entre irmãos dentro da mesma tabela de pontuação
   @@unique([scoringTableId, parentId, name], name: "uq_sibling_name")
   @@index([scoringTableId, parentId, sortOrder])
   @@map("scoring_node")
@@ -154,6 +154,7 @@ model ScoringItem {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedDate    DateTime?
+  formulaKey     String?   @db.VarChar(30)
 
   table        ScoringTable   @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Cascade)
   node         ScoringNode    @relation(fields: [nodeId], references: [idScoringNode], onDelete: Cascade)
@@ -161,6 +162,22 @@ model ScoringItem {
 
   @@index([nodeId])
   @@map("scoring_item")
+}
+
+model ProcessNodeScore {
+  idProcessNodeScore Int       @id @default(autoincrement())
+  processId          Int
+  nodeId             Int
+  totalPoints        Decimal   @db.Decimal(10, 2)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedDate        DateTime?
+
+  process CareerProcess @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
+  node    ScoringNode   @relation(fields: [nodeId], references: [idScoringNode], onDelete: Cascade)
+
+  @@unique([processId, nodeId])
+  @@map("process_node_score")
 }
 
 enum ProcessType {
@@ -201,6 +218,7 @@ model CareerProcess {
 
   scores               ProcessScore[]
   ProcessStatusHistory ProcessStatusHistory[]
+  processNodeScores    ProcessNodeScore[]
 
   @@index([userId, status])
   @@index([scoringTableId])

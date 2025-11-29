@@ -427,4 +427,71 @@ export class ProcessoController {
       return
     }
   }
+    // ---- ENVIO DO PROCESSO PARA CPPD -----------------------------------------
+
+  public enviarProcesso: RequestHandler = async (req, res, _next) => {
+    try {
+      const auth = req.header("Authorization") || ""
+      const token = auth.startsWith("Bearer ") ? auth.slice(7) : auth
+
+      if (!token) {
+        HttpResponse.unauthorized(res)
+        return
+      }
+
+      const payload = jwt.verify(token, String(process.env.JWT_ACCESS_SECRET)) as any
+      const userId = Number(payload?.sub)
+      if (!userId || Number.isNaN(userId)) {
+        HttpResponse.unauthorized(res)
+        return
+      }
+
+      const processId = Number(req.params.id)
+      if (!processId || Number.isNaN(processId)) {
+        HttpResponse.badRequest(
+          res,
+          StatusCodeDescription.INVALID_INPUT,
+          "Parâmetro de processo inválido",
+          null
+        )
+        return
+      }
+
+      const result = await this.service.enviarParaAvaliacao(processId, userId)
+
+      return HttpResponse.ok(
+        res,
+        "Processo enviado para avaliação da CPPD com sucesso",
+        result
+      )
+    } catch (error) {
+      console.error("Erro ao enviar processo para avaliação:", error)
+
+      if (error instanceof NotFoundError) {
+        HttpResponse.badRequest(
+          res,
+          StatusCodeDescription.INVALID_INPUT,
+          error.message,
+          null
+        )
+        return
+      }
+
+      if (error instanceof BusinessRuleError) {
+        const details = (error as any).details ?? null
+
+        HttpResponse.badRequest(
+          res,
+          StatusCodeDescription.INVALID_INPUT,
+          error.message,
+          details
+        )
+        return
+      }
+
+      HttpResponse.internalError(res)
+      return
+    }
+  }
+
 }

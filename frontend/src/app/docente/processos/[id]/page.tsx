@@ -437,17 +437,18 @@ export default function ProcessoDetalhePage() {
       <ConfirmModal
         open={confirmDeleteOpen}
         title="Confirmar exclusão"
-        message={
+        description={
           processo
             ? `Tem certeza que deseja excluir o processo nº ${processo.processId}?`
             : "Tem certeza que deseja excluir este processo?"
         }
-        confirmLabel="Excluir"
-        cancelLabel="Cancelar"
-        variant="danger"
+        confirmText={deleting ? "Excluindo..." : "Excluir"}
+        cancelText="Cancelar"
+        loading={deleting}
         onConfirm={handleDeleteConfirmed}
         onCancel={() => setConfirmDeleteOpen(false)}
       />
+
 
       <div className="max-w-4xl mx-auto space-y-6">
         <header className="flex flex-wrap gap-3 justify-between items-center">
@@ -774,17 +775,17 @@ export default function ProcessoDetalhePage() {
               {!canFillScores && (
                 <p className="text-[11px] text-[var(--text-muted)]">
                   O preenchimento da pontuação só é permitido para processos nos status{" "}
-                  <span className="font-medium">DRAFT</span>,{" "}
-                  <span className="font-medium">RETURNED</span> ou{" "}
-                  <span className="font-medium">REJECTED</span>.
+                  <span className="font-medium">RASCUNHO</span>,{" "}
+                  <span className="font-medium">RETORNADO</span> ou{" "}
+                  <span className="font-medium">REJEITADO</span>.
                 </p>
               )}
 
               {!canDelete && (
                 <p className="text-[11px] text-[var(--text-muted)]">
                   A exclusão só é permitida para processos nos status{" "}
-                  <span className="font-medium">DRAFT</span> ou{" "}
-                  <span className="font-medium">REJECTED</span>.
+                  <span className="font-medium">RASCUNHO</span> ou{" "}
+                  <span className="font-medium">REJEITADO</span>.
                 </p>
               )}
             </section>

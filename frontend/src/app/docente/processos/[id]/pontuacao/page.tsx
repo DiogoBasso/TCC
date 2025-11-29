@@ -1,6 +1,7 @@
+// src/app/docente/processos/[id]/pontuacao/page.tsx
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import Modal from "@/components/Modal"
@@ -137,6 +138,13 @@ type EvidenceUpdateResponse = {
   }
 }
 
+// resposta do envio do processo
+type EnviarProcessoResponse = {
+  processId: number
+  status: ProcessStatus
+  totalPoints: number
+}
+
 // ícones simples em SVG
 function EyeIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -255,6 +263,8 @@ export default function ProcessoPontuacaoPage() {
     >
   >({})
 
+  const [sending, setSending] = useState(false)
+
   function openModal(payload: Omit<ModalState, "open">) {
     setModal({
       open: true,
@@ -368,6 +378,28 @@ export default function ProcessoPontuacaoPage() {
     (estrutura.status === "DRAFT" ||
       estrutura.status === "RETURNED" ||
       estrutura.status === "REJECTED")
+
+  // ✅ total de pontos do processo (soma de todos os itens)
+  const totalProcessPoints = useMemo(() => {
+    if (!estrutura) return 0
+
+    let sum = 0
+
+    estrutura.blocks.forEach(block => {
+      block.items.forEach(item => {
+        if (item.currentScore) {
+          const num = Number(item.currentScore.awardedPoints)
+          if (!Number.isNaN(num)) {
+            sum += num
+          }
+        }
+      })
+    })
+
+    return sum
+  }, [estrutura])
+
+  const hasMinimumPoints = totalProcessPoints >= 120
 
   async function loadUserEvidenceFiles() {
     try {
@@ -945,6 +977,64 @@ export default function ProcessoPontuacaoPage() {
     }
   }
 
+  // ✅ envio do processo para avaliação da CPPD
+  async function handleEnviarProcesso() {
+    if (!id) return
+    if (!estrutura) return
+
+    setSending(true)
+
+    try {
+      const r = await fetch(`/api/processos/${id}/enviar`, {
+        method: "POST",
+        credentials: "include"
+      })
+
+      const json = (await r.json().catch(() => null)) as ApiResponse<
+        EnviarProcessoResponse
+      >
+
+      if (!r.ok) {
+        openModal({
+          title: "Não foi possível enviar o processo",
+          message:
+            json?.message ||
+            "Ocorreu um erro ao enviar o processo para avaliação da CPPD.",
+          variant: "error"
+        })
+        return
+      }
+
+      if (json?.data) {
+        setEstrutura(prev =>
+          prev
+            ? {
+                ...prev,
+                status: json.data!.status
+              }
+            : prev
+        )
+      }
+
+      openModal({
+        title: "Processo enviado",
+        message:
+          "O processo foi enviado para avaliação da CPPD com sucesso. A partir de agora não é mais possível editar a pontuação.",
+        variant: "success"
+      })
+    } catch (e: any) {
+      openModal({
+        title: "Erro inesperado",
+        message:
+          e?.message ||
+          "Ocorreu um erro inesperado ao enviar o processo para avaliação.",
+        variant: "error"
+      })
+    } finally {
+      setSending(false)
+    }
+  }
+
   function renderItemRow(item: ScoringItem) {
     const form = itemForm[item.itemId] || {
       quantity: "",
@@ -1511,12 +1601,74 @@ export default function ProcessoPontuacaoPage() {
               {!canEditScores && (
                 <p className="text-[11px] text-[var(--text-muted)] max-w-xs">
                   A pontuação só pode ser alterada quando o processo está nos
-                  status <span className="font-medium">DRAFT</span>,{" "}
-                  <span className="font-medium">RETURNED</span> ou{" "}
-                  <span className="font-medium">REJECTED</span>. No momento, os
+                  status <span className="font-medium">RASCUNHO</span>,{" "}
+                  <span className="font-medium">RETORNADO</span> ou{" "}
+                  <span className="font-medium">REJEITADO</span>. No momento, os
                   campos estão somente para leitura.
                 </p>
               )}
+            </section>
+
+            {/* ✅ Resumo de pontuação e envio do processo */}
+            <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-bg)] p-4 shadow-sm flex flex-wrap gap-4 justify-between items-start">
+              <div className="space-y-1 text-sm text-[var(--text-secondary)]">
+                <div className="font-semibold text-[var(--text-primary)]">
+                  Resumo de pontuação
+                </div>
+                <div>
+                  Pontuação total do processo:{" "}
+                  <span className="font-bold text-[var(--text-primary)]">
+                    {formatPoints(totalProcessPoints)} pontos
+                  </span>
+                </div>
+                <div className="text-[11px] text-[var(--text-muted)]">
+                  É necessário atingir pelo menos{" "}
+                  <span className="font-medium">120 pontos</span> para enviar o
+                  processo para avaliação da CPPD.
+                </div>
+
+                {!hasMinimumPoints && (
+                  <div className="text-[11px] text-red-600 mt-1">
+                    Pontuação mínima ainda não alcançada. Continue preenchendo
+                    a planilha para atingir os 120 pontos necessários.
+                  </div>
+                )}
+
+                {estrutura.status !== "DRAFT" &&
+                  estrutura.status !== "RETURNED" && (
+                    <div className="text-[11px] text-[var(--text-muted)] mt-1">
+                      O processo só pode ser enviado enquanto estiver nos status{" "}
+                      <span className="font-medium">Rascunho</span> ou{" "}
+                      <span className="font-medium">Devolvido</span>.
+                    </div>
+                  )}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={handleEnviarProcesso}
+                  disabled={
+                    !estrutura ||
+                    (estrutura.status !== "DRAFT" &&
+                      estrutura.status !== "RETURNED") ||
+                    !hasMinimumPoints ||
+                    sending
+                  }
+                  className="px-4 py-2 rounded-full text-sm font-medium
+                             bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)]
+                             hover:bg-[var(--btn-primary-hover-bg)]
+                             disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  {sending ? "Enviando processo..." : "Enviar processo para CPPD"}
+                </button>
+
+                <p className="text-[11px] text-[var(--text-muted)] max-w-xs">
+                  Antes de enviar, revise cuidadosamente as informações
+                  preenchidas e os comprovantes anexados. Após o envio, o
+                  processo seguirá para análise da CPPD.
+                </p>
+              </div>
             </section>
 
             <section className="space-y-4">

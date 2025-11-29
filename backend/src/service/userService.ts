@@ -24,16 +24,18 @@ function normalizeCpf(cpf: string): string {
   return (cpf || "").replace(/\D/g, "")
 }
 
+function onlyDigits(value: string) {
+  return (value || "").replace(/\D/g, "")
+}
+
 export class UserService {
   constructor(
     private readonly userRepository: UserRepository
   ) {}
 
   async login(dto: LoginDto): Promise<LoginResponseWithRoles> {
-    const cpf = normalizeCpf(dto.cpf)
-    if (cpf.length !== 11) throw new InvalidCredentials()
-
-    const user = await this.userRepository.findByCpf(cpf)
+    const cleanCpf = onlyDigits(dto.cpf)
+    const user = await this.userRepository.findByCpf(cleanCpf)
     if (!user) throw new InvalidCredentials()
 
     const ok = await bcrypt.compare(dto.password, user.passwordHash)
@@ -121,59 +123,59 @@ export class UserService {
   }
 
   async createUser(dto: CreateUserDto): Promise<UserResponseDto> {
-    const normalizedCpf = normalizeCpf(dto.cpf)
+  const existing = await this.userRepository.findByCpf(onlyDigits(dto.cpf))
+  if (existing) {
+    throw new UserExists()
+  }
 
-    const existing = await this.userRepository.findByCpf(normalizedCpf)
-    if (existing) {
+  if (dto.roles.includes("DOCENTE" as RoleName) && !dto.docenteProfile) {
+    if (typeof DocenteProfileRequired !== "undefined") {
+      throw new DocenteProfileRequired()
+    }
+    throw new Error('DocenteProfile é obrigatório quando roles inclui "DOCENTE"')
+  }
+
+  const passwordHash = await bcrypt.hash(dto.password, 10)
+  const cleanCpf = onlyDigits(dto.cpf)
+
+  try {
+    const created = await this.userRepository.createWithRolesAndDocente({
+      name: dto.name,
+      email: dto.email,
+      phone: dto.phone ?? null,
+      city: dto.city ?? null,
+      uf: dto.uf ?? null,
+      cpf: cleanCpf,
+      passwordHash,
+      roles: dto.roles,
+      docenteProfile: dto.docenteProfile
+        ? {
+            siape: dto.docenteProfile.siape,
+            classLevel: dto.docenteProfile.classLevel,
+            startInterstice: dto.docenteProfile.startInterstice,
+            educationLevel: dto.docenteProfile.educationLevel,
+            improvement: dto.docenteProfile.improvement ?? null,
+            specialization: dto.docenteProfile.specialization ?? null,
+            mastersDegree: dto.docenteProfile.mastersDegree ?? null,
+            doctorate: dto.docenteProfile.doctorate ?? null,
+            assignment: dto.docenteProfile.assignment ?? null,
+            department: dto.docenteProfile.department ?? null,
+            division: dto.docenteProfile.division ?? null,
+            role: dto.docenteProfile.role ?? null,
+            immediateSupervisor: dto.docenteProfile.immediateSupervisor ?? null
+          }
+        : undefined
+    })
+
+    return this.toResponse(created)
+  } catch (err: any) {
+    if (err?.code === "P2002") {
       throw new UserExists()
     }
-
-    if (dto.roles.includes("DOCENTE" as RoleName) && !dto.docenteProfile) {
-      if (typeof DocenteProfileRequired !== "undefined") {
-        throw new DocenteProfileRequired()
-      }
-      throw new Error('DocenteProfile é obrigatório quando roles inclui "DOCENTE"')
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password, 10)
-
-    try {
-      const created = await this.userRepository.createWithRolesAndDocente({
-        name: dto.name,
-        email: dto.email,
-        phone: dto.phone ?? null,
-        cpf: normalizedCpf,                  // ✅ cpf só com dígitos
-        city: dto.city ?? null,              // ✅ novo
-        uf: dto.uf ?? null,                  // ✅ novo
-        passwordHash,
-        roles: dto.roles,
-        docenteProfile: dto.docenteProfile
-          ? {
-              siape: dto.docenteProfile.siape,
-              classLevel: dto.docenteProfile.classLevel,
-              startInterstice: dto.docenteProfile.startInterstice,
-              educationLevel: dto.docenteProfile.educationLevel,
-              improvement: dto.docenteProfile.improvement ?? null,
-              specialization: dto.docenteProfile.specialization ?? null,
-              mastersDegree: dto.docenteProfile.mastersDegree ?? null,
-              doctorate: dto.docenteProfile.doctorate ?? null,
-              assignment: dto.docenteProfile.assignment ?? null,
-              department: dto.docenteProfile.department ?? null,
-              division: dto.docenteProfile.division ?? null,
-              role: dto.docenteProfile.role ?? null,
-              immediateSupervisor: dto.docenteProfile.immediateSupervisor ?? null
-            }
-          : undefined
-      })
-
-      return this.toResponse(created)
-    } catch (err: any) {
-      if (err?.code === "P2002") {
-        throw new UserExists()
-      }
-      throw err
-    }
+    throw err
   }
+}
+
 
   async getUserById(userId: number): Promise<UserResponseDto> {
     const user = await this.userRepository.findById(userId)
@@ -212,35 +214,35 @@ export class UserService {
     const normalizedCpf = dto.cpf ? normalizeCpf(dto.cpf) : undefined
 
     const updated = await this.userRepository.updateWithRolesAndDocente(userId, {
-      name: dto.name,
-      email: dto.email,
-      phone: dto.phone ?? undefined,
-      cpf: normalizedCpf,
-      city: dto.city ?? undefined,    // ✅ novo
-      uf: dto.uf ?? undefined,        // ✅ novo
-      active: dto.active,
-      roles: dto.roles as RoleName[] | undefined,
-      docenteProfile: dto.docenteProfile
-        ? {
-            siape: dto.docenteProfile.siape,
-            classLevel: dto.docenteProfile.classLevel as ClassLevel | undefined,
-            startInterstice: dto.docenteProfile.startInterstice,
-            educationLevel: dto.docenteProfile.educationLevel,
-            improvement: dto.docenteProfile.improvement ?? null,
-            specialization: dto.docenteProfile.specialization ?? null,
-            mastersDegree: dto.docenteProfile.mastersDegree ?? null,
-            doctorate: dto.docenteProfile.doctorate ?? null,
-            assignment: dto.docenteProfile.assignment ?? null,
-            department: dto.docenteProfile.department ?? null,
-            division: dto.docenteProfile.division ?? null,
-            role: dto.docenteProfile.role ?? null,
-            immediateSupervisor: dto.docenteProfile.immediateSupervisor ?? null
-          }
-        : undefined
-    })
+    name: dto.name,
+    email: dto.email,
+    phone: dto.phone ?? undefined,
+    city: dto.city ?? undefined,
+    uf: dto.uf ?? undefined,
+    cpf: dto.cpf ? onlyDigits(dto.cpf) : undefined,
+    active: dto.active,
+    roles: dto.roles as RoleName[] | undefined,
+    docenteProfile: dto.docenteProfile
+      ? {
+          siape: dto.docenteProfile.siape,
+          classLevel: dto.docenteProfile.classLevel as ClassLevel | undefined,
+          startInterstice: dto.docenteProfile.startInterstice,
+          educationLevel: dto.docenteProfile.educationLevel,
+          improvement: dto.docenteProfile.improvement ?? null,
+          specialization: dto.docenteProfile.specialization ?? null,
+          mastersDegree: dto.docenteProfile.mastersDegree ?? null,
+          doctorate: dto.docenteProfile.doctorate ?? null,
+          assignment: dto.docenteProfile.assignment ?? null,
+          department: dto.docenteProfile.department ?? null,
+          division: dto.docenteProfile.division ?? null,
+          role: dto.docenteProfile.role ?? null,
+          immediateSupervisor: dto.docenteProfile.immediateSupervisor ?? null
+        }
+      : undefined
+  })
 
-    return this.toResponse(updated)
-  }
+  return this.toResponse(updated)
+}
 
   async deleteUserById(userId: number): Promise<UserResponseDto> {
     const current = await this.userRepository.findById(userId)

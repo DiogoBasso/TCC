@@ -1,3 +1,4 @@
+// src/type/dto/processoDto.ts
 import { ClassLevel, ProcessType } from "@prisma/client"
 
 export interface DocentePatchDto {
@@ -20,6 +21,8 @@ export interface UserPatchDto {
   name?: string
   email?: string
   phone?: string | null
+  city?: string | null
+  uf?: string | null
   docenteProfile?: DocentePatchDto
 }
 

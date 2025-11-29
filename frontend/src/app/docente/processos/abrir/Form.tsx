@@ -25,64 +25,68 @@ type ModalState = {
   variant: ModalVariant
 }
 
-// tipos mínimos pro /me
-type MeDocenteProfile = {
-  classLevel?: string
-  startInterstice?: string
-  assignment?: string | null
+// tipos simplificados do /me
+type DocenteProfileMe = {
+  siape: string
+  classLevel: string   // ex: "B1"
+  startInterstice: string
+  educationLevel: string
+  assignment?: string | null   // campus salvo no profile
 }
 
-type MeUser = {
-  city?: string | null
-  uf?: string | null
-  docenteProfile?: MeDocenteProfile | null
+type UserMe = {
+  name: string
+  email: string
+  phone: string | null
+  city: string | null
+  uf: string | null
+  docenteProfile: DocenteProfileMe | null
 }
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
-}
+// combinações permitidas (mantém em sincronia com o enum ClassLevel + regras do backend)
+const PROGRESSAO_MOVES = [
+  { fromClass: "A", fromLevel: "1", toClass: "B", toLevel: "1", label: "B1" },
+  { fromClass: "B", fromLevel: "4", toClass: "C", toLevel: "1", label: "C1" },
+  { fromClass: "C", fromLevel: "4", toClass: "D", toLevel: "1", label: "D1" }
+]
 
-function toISODate(value?: string | Date | null): string {
-  if (!value) return todayISO()
-  const d = typeof value === "string" ? new Date(value) : value
-  if (Number.isNaN(d.getTime())) return todayISO()
-  return d.toISOString().slice(0, 10)
-}
+const PROMOCAO_MOVES = [
+  { fromClass: "B", fromLevel: "1", toClass: "B", toLevel: "2", label: "B2" },
+  { fromClass: "B", fromLevel: "2", toClass: "B", toLevel: "3", label: "B3" },
+  { fromClass: "B", fromLevel: "3", toClass: "B", toLevel: "4", label: "B4" },
+  { fromClass: "C", fromLevel: "1", toClass: "C", toLevel: "2", label: "C2" },
+  { fromClass: "C", fromLevel: "2", toClass: "C", toLevel: "3", label: "C3" },
+  { fromClass: "C", fromLevel: "3", toClass: "C", toLevel: "4", label: "C4" }
+]
 
-// chuta destino com base nas regras de negócio
-function guessDestino(tipo: ProcessType, origemCodigo: string) {
-  const code = origemCodigo.toUpperCase()
-
-  if (tipo === "PROGRESSAO") {
-    if (code === "A1") return { classe: "B", nivel: "1" } // A1 -> B1
-    if (code === "B4") return { classe: "C", nivel: "1" } // B4 -> C1
-    if (code === "C4") return { classe: "D", nivel: "1" } // C4 -> D1
-    return null
-  }
-
-  // PROMOCAO
-  if (code === "B1") return { classe: "B", nivel: "2" }
-  if (code === "B2") return { classe: "B", nivel: "3" }
-  if (code === "B3") return { classe: "B", nivel: "4" }
-  if (code === "C1") return { classe: "C", nivel: "2" }
-  if (code === "C2") return { classe: "C", nivel: "3" }
-  if (code === "C3") return { classe: "C", nivel: "4" }
-  return null
-}
+// mapeamento de classe/nível de origem → tipo padrão
+const ORIGENS_PROGRESSAO = new Set(["A1", "B4", "C4"])
+const ORIGENS_PROMOCAO = new Set(["B1", "B2", "B3", "C1", "C2", "C3"])
 
 export default function Form() {
   const router = useRouter()
 
+  // dados do docente (usados no patchUsuario e no requerimento)
+  const [nome, setNome] = useState("")
+  const [email, setEmail] = useState("")
+  const [telefone, setTelefone] = useState("")
+  const [siape, setSiape] = useState("")
+  const [classLevel, setClassLevel] = useState("") // string do enum, ex "B1"
+  const [educationLevel, setEducationLevel] = useState("")
+  const [cidade, setCidade] = useState("")
+  const [estado, setEstado] = useState("")
+
+  // dados específicos do processo
   const [tipo, setTipo] = useState<ProcessType>("PROGRESSAO")
-  const [campus, setCampus] = useState("Santa Rosa")
-  const [cidade, setCidade] = useState("Santa Rosa")
-  const [estado, setEstado] = useState("RS")
-  const [intersticioInicio, setIntersticioInicio] = useState(todayISO())
+  const [campus, setCampus] = useState("")
+  const [intersticioInicio, setIntersticioInicio] = useState("")
   const [intersticioFim, setIntersticioFim] = useState("")
-  const [classeOrigem, setClasseOrigem] = useState("A")
-  const [nivelOrigem, setNivelOrigem] = useState("1")
-  const [classeDestino, setClasseDestino] = useState("B")
-  const [nivelDestino, setNivelDestino] = useState("1")
+
+  // classe/nível origem/destino (derivados dos selects)
+  const [classeOrigem, setClasseOrigem] = useState("")
+  const [nivelOrigem, setNivelOrigem] = useState("")
+  const [classeDestino, setClasseDestino] = useState("")
+  const [nivelDestino, setNivelDestino] = useState("")
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,7 +99,7 @@ export default function Form() {
   })
 
   const cidadeUF = useMemo(
-    () => `${cidade} - ${estado}`,
+    () => (cidade && estado ? `${cidade} - ${estado}` : ""),
     [cidade, estado]
   )
 
@@ -113,72 +117,170 @@ export default function Form() {
     }))
   }
 
-  // 🔥 NOVO: buscar dados do usuário pra pré-preencher o formulário
+  // helper pra separar classe/nivel de algo tipo "B2"
+  function splitClassLevel(code: string | null | undefined) {
+    if (!code || code.length < 2) return { classe: "", nivel: "" }
+    const upper = code.toUpperCase()
+    return {
+      classe: upper.slice(0, 1),
+      nivel: upper.slice(1)
+    }
+  }
+
+  function inferTipoByOrigem(code: string): ProcessType | null {
+    if (ORIGENS_PROGRESSAO.has(code)) return "PROGRESSAO"
+    if (ORIGENS_PROMOCAO.has(code)) return "PROMOCAO"
+    return null
+  }
+
+  const moves = useMemo(
+    () => (tipo === "PROGRESSAO" ? PROGRESSAO_MOVES : PROMOCAO_MOVES),
+    [tipo]
+  )
+
+  const origemCode = useMemo(
+    () => (classeOrigem && nivelOrigem ? `${classeOrigem}${nivelOrigem}` : ""),
+    [classeOrigem, nivelOrigem]
+  )
+
+  const origemOptions = useMemo(() => {
+    const set = new Set<string>()
+    const result: { code: string; label: string }[] = []
+
+    for (const m of moves) {
+      const code = `${m.fromClass}${m.fromLevel}`
+      if (!set.has(code)) {
+        set.add(code)
+        result.push({ code, label: code }) // exibe "B1", "C4", etc
+      }
+    }
+
+    return result
+  }, [moves])
+
+  const destinoOptions = useMemo(() => {
+    if (!origemCode) return []
+    return moves
+      .filter(m => `${m.fromClass}${m.fromLevel}` === origemCode)
+      .map(m => ({
+        code: `${m.toClass}${m.toLevel}`,
+        label: m.label
+      }))
+  }, [moves, origemCode])
+
+  // carrega dados do usuário em /me e pré-preenche APENAS o que veio do banco
   useEffect(() => {
     let cancelled = false
 
-    async function loadUser() {
+    async function loadMe() {
       try {
         const r = await fetch("/api/me", {
-          method: "GET",
-          credentials: "include"
+          method: "GET"
         })
 
         if (!r.ok) return
 
-        const json = (await r.json().catch(() => null)) as ApiResponse<MeUser>
+        const json: ApiResponse<UserMe> = await r.json().catch(() => ({
+          status: "error",
+          message: "Falha ao ler resposta",
+          data: null
+        }))
+
         const user = json?.data
         if (!user || cancelled) return
 
-        // cidade / UF
-        if (user.city) {
-          setCidade(user.city)
-        }
-        if (user.uf) {
-          setEstado(user.uf)
-        }
+        // tudo aqui vem diretamente do banco
+        setNome(user.name ?? "")
+        setEmail(user.email ?? "")
+        setTelefone(user.phone ?? "")
 
-        const docente = user.docenteProfile
-        if (docente) {
-          // campus a partir da lotação do docente
-          if (docente.assignment) {
-            setCampus(docente.assignment)
+        if (user.city) setCidade(user.city)
+        if (user.uf) setEstado(user.uf)
+
+        if (user.docenteProfile) {
+          setSiape(user.docenteProfile.siape ?? "")
+          setClassLevel(user.docenteProfile.classLevel ?? "")
+          setEducationLevel(user.docenteProfile.educationLevel ?? "")
+
+          if (user.docenteProfile.startInterstice) {
+            const d = new Date(user.docenteProfile.startInterstice)
+            const iso = d.toISOString().slice(0, 10)
+            setIntersticioInicio(iso)
           }
 
-          // início do interstício
-          if (docente.startInterstice) {
-            setIntersticioInicio(toISODate(docente.startInterstice))
-          }
+          // origem padrão = classLevel que já está salvo no banco
+          if (user.docenteProfile.classLevel) {
+            const { classe, nivel } = splitClassLevel(user.docenteProfile.classLevel)
+            setClasseOrigem(classe)
+            setNivelOrigem(nivel)
 
-          // classe/nivel origem a partir do enum ClassLevel (ex.: "B4")
-          if (docente.classLevel) {
-            const code = docente.classLevel.toUpperCase()
-            const classe = code.charAt(0)
-            const nivel = code.slice(1)
-
-            if (classe && nivel) {
-              setClasseOrigem(classe)
-              setNivelOrigem(nivel)
-
-              const destino = guessDestino(tipo, code)
-              if (destino) {
-                setClasseDestino(destino.classe)
-                setNivelDestino(destino.nivel)
-              }
+            const currentCode = `${classe}${nivel}`
+            const inferred = inferTipoByOrigem(currentCode)
+            if (inferred) {
+              setTipo(inferred) // 🔥 só define o valor inicial do tipo
             }
+          }
+
+          // campus vindo do assignment do perfil, se existir
+          if (user.docenteProfile.assignment) {
+            setCampus(user.docenteProfile.assignment)
           }
         }
       } catch {
-        // se der erro aqui, só não pré-preenche, não quebra o form
+        // silencioso por enquanto
       }
     }
 
-    loadUser()
-
+    loadMe()
     return () => {
       cancelled = true
     }
-  }, [tipo])
+  }, [])
+
+  function handleChangeOrigem(e: React.ChangeEvent<HTMLSelectElement>) {
+    const code = e.target.value
+    if (!code) {
+      setClasseOrigem("")
+      setNivelOrigem("")
+      setClasseDestino("")
+      setNivelDestino("")
+      return
+    }
+
+    const classe = code.slice(0, 1)
+    const nivel = code.slice(1)
+
+    setClasseOrigem(classe)
+    setNivelOrigem(nivel)
+
+    // se o destino atual não é válido para essa origem, limpa
+    const possible = moves.filter(
+      m => `${m.fromClass}${m.fromLevel}` === code
+    )
+    const hasCurrentDest = possible.some(
+      m => m.toClass === classeDestino && m.toLevel === nivelDestino
+    )
+
+    if (!hasCurrentDest) {
+      setClasseDestino("")
+      setNivelDestino("")
+    }
+  }
+
+  function handleChangeDestino(e: React.ChangeEvent<HTMLSelectElement>) {
+    const code = e.target.value
+    if (!code) {
+      setClasseDestino("")
+      setNivelDestino("")
+      return
+    }
+
+    const classe = code.slice(0, 1)
+    const nivel = code.slice(1)
+
+    setClasseDestino(classe)
+    setNivelDestino(nivel)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -186,10 +288,36 @@ export default function Form() {
     setError(null)
 
     try {
+      // prioridade é SEMPRE o que está na origem (classeOrigem/nivelOrigem)
+      const classLevelFinal =
+        (classeOrigem && nivelOrigem
+          ? `${classeOrigem}${nivelOrigem}`
+          : classLevel) || ""
+
+      const hasDocentePatch =
+        siape || classLevelFinal || educationLevel || intersticioInicio || campus
+
+      const patchUsuario = {
+        name: nome || undefined,
+        email: email || undefined,
+        phone: telefone || undefined,
+        city: cidade || undefined,
+        uf: estado || undefined,
+        docenteProfile: hasDocentePatch
+          ? {
+              siape: siape || undefined,
+              classLevel: classLevelFinal || undefined,
+              startInterstice: intersticioInicio || undefined,
+              educationLevel: educationLevel || undefined,
+              assignment: campus || undefined
+            }
+          : undefined
+      }
+
       const payload = {
-        patchUsuario: null,
+        patchUsuario,
         processo: {
-          tipo,
+          tipo, // 🔥 usuário ainda pode alterar no select
           campus,
           cidadeUF,
           dataEmissaoISO: new Date().toISOString(),
@@ -251,6 +379,13 @@ export default function Form() {
     }
   }
 
+  const inputClass =
+    "border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm " +
+    "bg-[var(--input-bg)] text-[var(--text-primary)] " +
+    "focus:outline-none focus:border-[var(--input-border-focus)]"
+
+  const selectClass = inputClass + " pr-8"
+
   return (
     <>
       <Modal
@@ -267,7 +402,7 @@ export default function Form() {
             Abrir novo processo
           </h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Informe os dados do interstício e da movimentação desejada para iniciar o processo.
+            Revise seus dados e informe o interstício e a movimentação desejada para iniciar o processo.
           </p>
         </header>
 
@@ -278,18 +413,71 @@ export default function Form() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Dados do docente */}
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              Dados do docente
+            </h2>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="font-medium text-[var(--text-primary)]">
+                  Nome
+                </label>
+                <input
+                  className={inputClass}
+                  value={nome}
+                  onChange={e => setNome(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="font-medium text-[var(--text-primary)]">
+                  E-mail
+                </label>
+                <input
+                  type="email"
+                  className={inputClass}
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="font-medium text-[var(--text-primary)]">
+                  Telefone / Celular
+                </label>
+                <input
+                  className={inputClass}
+                  value={telefone}
+                  onChange={e => setTelefone(e.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="font-medium text-[var(--text-primary)]">
+                  SIAPE
+                </label>
+                <input
+                  className={inputClass}
+                  value={siape}
+                  onChange={e => setSiape(e.target.value)}
+                />
+              </div>
+            </div>
+          </section>
+
           {/* Tipo e campus */}
-          <div className="grid md:grid-cols-2 gap-4">
+          <section className="grid md:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1 text-sm">
               <label className="font-medium text-[var(--text-primary)]">
                 Tipo de processo
               </label>
               <select
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={selectClass}
                 value={tipo}
-                onChange={e => setTipo(e.target.value as ProcessType)}
+                onChange={e => {
+                  setTipo(e.target.value as ProcessType)
+                  // ao trocar o tipo, o conjunto de movimentos muda → resetar destino
+                  setClasseDestino("")
+                  setNivelDestino("")
+                }}
               >
                 <option value="PROGRESSAO">Progressão</option>
                 <option value="PROMOCAO">Promoção</option>
@@ -301,25 +489,21 @@ export default function Form() {
                 Campus
               </label>
               <input
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={inputClass}
                 value={campus}
                 onChange={e => setCampus(e.target.value)}
               />
             </div>
-          </div>
+          </section>
 
           {/* Cidade / UF */}
-          <div className="grid md:grid-cols-3 gap-4">
+          <section className="grid md:grid-cols-3 gap-4">
             <div className="md:col-span-2 flex flex-col gap-1 text-sm">
               <label className="font-medium text-[var(--text-primary)]">
                 Cidade
               </label>
               <input
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={inputClass}
                 value={cidade}
                 onChange={e => setCidade(e.target.value)}
               />
@@ -329,27 +513,23 @@ export default function Form() {
                 UF
               </label>
               <input
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={inputClass}
                 value={estado}
                 maxLength={2}
                 onChange={e => setEstado(e.target.value.toUpperCase())}
               />
             </div>
-          </div>
+          </section>
 
           {/* Interstício */}
-          <div className="grid md:grid-cols-2 gap-4">
+          <section className="grid md:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1 text-sm">
               <label className="font-medium text-[var(--text-primary)]">
                 Início do interstício
               </label>
               <input
                 type="date"
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={inputClass}
                 value={intersticioInicio}
                 onChange={e => setIntersticioInicio(e.target.value)}
               />
@@ -360,75 +540,62 @@ export default function Form() {
               </label>
               <input
                 type="date"
-                className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                           bg-[var(--input-bg)] text-[var(--text-primary)]
-                           focus:outline-none focus:border-[var(--input-border-focus)]"
+                className={inputClass}
                 value={intersticioFim}
                 onChange={e => setIntersticioFim(e.target.value)}
               />
             </div>
-          </div>
+          </section>
 
           {/* Movimentação */}
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                Origem
-              </h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1 text-sm">
-                  <label className="text-[var(--text-secondary)]">Classe</label>
-                  <input
-                    className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                               bg-[var(--input-bg)] text-[var(--text-primary)]
-                               focus:outline-none focus:border-[var(--input-border-focus)]"
-                    value={classeOrigem}
-                    onChange={e => setClasseOrigem(e.target.value.toUpperCase())}
-                  />
-                </div>
-                <div className="flex flex-col gap-1 text-sm">
-                  <label className="text-[var(--text-secondary)]">Nível</label>
-                  <input
-                    className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                               bg-[var(--input-bg)] text-[var(--text-primary)]
-                               focus:outline-none focus:border-[var(--input-border-focus)]"
-                    value={nivelOrigem}
-                    onChange={e => setNivelOrigem(e.target.value)}
-                  />
-                </div>
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              Movimentação na carreira
+            </h2>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="text-[var(--text-primary)]">
+                  Classe / nível de origem
+                </label>
+                <select
+                  className={selectClass}
+                  value={origemCode}
+                  onChange={handleChangeOrigem}
+                >
+                  <option value="">Selecione a origem...</option>
+                  {origemOptions.map(opt => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.code}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="text-[var(--text-primary)]">
+                  Classe / nível de destino
+                </label>
+                <select
+                  className={selectClass}
+                  value={classeDestino && nivelDestino ? `${classeDestino}${nivelDestino}` : ""}
+                  onChange={handleChangeDestino}
+                  disabled={!origemCode}
+                >
+                  <option value="">
+                    {origemCode ? "Selecione o destino..." : "Escolha primeiro a origem"}
+                  </option>
+                  {destinoOptions.map(opt => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
+          </section>
 
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-                Destino
-              </h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1 text-sm">
-                  <label className="text-[var(--text-secondary)]">Classe</label>
-                  <input
-                    className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                               bg-[var(--input-bg)] text-[var(--text-primary)]
-                               focus:outline-none focus:border-[var(--input-border-focus)]"
-                    value={classeDestino}
-                    onChange={e => setClasseDestino(e.target.value.toUpperCase())}
-                  />
-                </div>
-                <div className="flex flex-col gap-1 text-sm">
-                  <label className="text-[var(--text-secondary)]">Nível</label>
-                  <input
-                    className="border border-[var(--input-border)] rounded-xl px-3 py-2 text-sm
-                               bg-[var(--input-bg)] text-[var(--text-primary)]
-                               focus:outline-none focus:border-[var(--input-border-focus)]"
-                    value={nivelDestino}
-                    onChange={e => setNivelDestino(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Botões */}
+          {/* Botão */}
           <div className="flex gap-3">
             <button
               type="submit"

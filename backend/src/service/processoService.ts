@@ -13,6 +13,7 @@ import { convertDocxToPdf } from "../util/convertToPdf"
 import { ProcessRepository } from "../repository/processoRepository"
 import { ScoringTableRepository } from "../repository/scoringTableRepository"
 import { UserRepository } from "../repository/userRepository"
+import { ProcessScoreRepository } from "../repository/processScoreRepository"
 
 dayjs.locale("pt-br")
 dayjs.extend(utc)
@@ -38,8 +39,65 @@ export class ProcessoService {
   constructor(
     private readonly processRepo: ProcessRepository,
     private readonly tableRepo: ScoringTableRepository,
-    private readonly userRepo: UserRepository
-  ) {}
+    private readonly userRepo: UserRepository,
+    private readonly scoreRepo: ProcessScoreRepository = new ProcessScoreRepository()
+  ) { }
+
+    // ---- ENVIO DO PROCESSO PARA AVALIAÇÃO DA CPPD ----------------------------
+
+  async enviarParaAvaliacao(processId: number, userId: number) {
+    const careerProcess = await this.processRepo.findById(processId)
+    if (!careerProcess || careerProcess.deletedDate) {
+      throw new NotFoundError("Processo não encontrado")
+    }
+
+    if (careerProcess.userId !== userId) {
+      throw new NotFoundError("Processo não encontrado")
+    }
+
+    if (
+      careerProcess.status !== ProcessStatus.DRAFT &&
+      careerProcess.status !== ProcessStatus.RETURNED
+    ) {
+      throw new BusinessRuleError(
+        "Só é permitido enviar processos nos status DRAFT ou RETURNED."
+      )
+    }
+
+    // ✅ Garante regra de interstício e combinação (mesma usada para gerar requerimento)
+    this.validarRegrasDeRequerimento(careerProcess)
+
+    // ✅ Soma total de pontos do processo
+    const totalPontos = await this.scoreRepo.sumTotalAwardedPointsByProcess(processId)
+
+    if (totalPontos < 120) {
+      throw new BusinessRuleError(
+        `Para enviar o processo é necessário atingir ao menos 120 pontos. ` +
+          `Pontuação atual: ${totalPontos.toFixed(2)}.`,
+        {
+          requiredMinimum: 120,
+          currentTotal: totalPontos
+        }
+      )
+    }
+
+    // ✅ Atualiza status para SUBMITTED
+    const updated = await this.processRepo.updateStatus(
+      processId,
+      ProcessStatus.SUBMITTED
+    )
+
+    // 📝 Futuro:
+    // - gerar PDF da planilha de pontuação
+    // - gerar PDF único com todos os comprovantes na ordem da planilha
+    // - salvar caminhos/URLs desses arquivos no processo
+
+    return {
+      processId: updated.idProcess,
+      status: updated.status,
+      totalPoints: totalPontos
+    }
+  }
 
   // ---- ABERTURA DE PROCESSO -------------------------------------------------
 
@@ -55,20 +113,24 @@ export class ProcessoService {
         name: patch.name,
         email: patch.email,
         phone: patch.phone ?? undefined,
+        city: patch.city ?? undefined,
+        uf: patch.uf ?? undefined,
         docenteProfile: patch.docenteProfile
           ? {
-              siape: patch.docenteProfile.siape,
-              classLevel: patch.docenteProfile.classLevel,
-              startInterstice: patch.docenteProfile.startInterstice
-                ? new Date(patch.docenteProfile.startInterstice)
-                : undefined,
-              educationLevel: patch.docenteProfile.educationLevel
-            }
+            siape: patch.docenteProfile.siape,
+            classLevel: patch.docenteProfile.classLevel,
+            startInterstice: patch.docenteProfile.startInterstice
+              ? new Date(patch.docenteProfile.startInterstice)
+              : undefined,
+            educationLevel: patch.docenteProfile.educationLevel,
+            assignment: patch.docenteProfile.assignment ?? undefined   // 👈 aqui
+          }
           : undefined
       }
 
       await this.userRepo.updateWithRolesAndDocente(userId, updateInput)
     }
+
 
     const vigente = await this.tableRepo.findVigente(now)
     if (!vigente) {
@@ -648,7 +710,7 @@ export class ProcessoService {
       if (!combinacoesValidas.includes(chave)) {
         throw new BusinessRuleError(
           `Combinação de progressão inválida: ${origemCodigo} → ${destinoCodigo}. ` +
-            "As progressões permitidas são: A1→B1, B4→C1 e C4→D1."
+          "As progressões permitidas são: A1→B1, B4→C1 e C4→D1."
         )
       }
 
@@ -714,4 +776,5 @@ export class ProcessoService {
       nivelDestino: careerProcess.nivelDestino
     }
   }
+  
 }

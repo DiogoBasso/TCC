@@ -6,6 +6,7 @@ import { ProcessRepository } from "../repository/processoRepository"
 import { ScoringTableRepository } from "../repository/scoringTableRepository"
 import { ProcessScoreRepository } from "../repository/processScoreRepository"
 import { EvidenceFileRepository } from "../repository/evidenceFileRepository"
+import { ProcessNodeScoreRepository } from "../repository/processNodeScoreRepository"
 import { UpdateItemScoreDto } from "../type/dto/processScoreDto"
 import { BusinessRuleError, NotFoundError } from "./processoService"
 
@@ -17,15 +18,45 @@ function decimalToNumber(value: any): number {
   return Number(value)
 }
 
+function evaluateNodeFormula(
+  formulaExpression: string,
+  variables: Record<string, number>
+): number {
+  try {
+    const argNames = Object.keys(variables)
+    const argValues = Object.values(variables)
+
+    const fn = new Function(
+      ...argNames,
+      `return ${formulaExpression};`
+    ) as (...args: number[]) => number
+
+    const result = fn(...argValues)
+    const num = Number(result)
+
+    if (!Number.isFinite(num)) {
+      throw new Error("Resultado não numérico")
+    }
+
+    return num
+  } catch (err) {
+    console.error("Erro ao avaliar fórmula do nó:", err)
+    throw new BusinessRuleError(
+      "Fórmula de cálculo inválida para o bloco de pontuação."
+    )
+  }
+}
+
 export class ProcessScoreService {
   constructor(
     private readonly processRepo: ProcessRepository,
     private readonly tableRepo: ScoringTableRepository,
     private readonly scoreRepo: ProcessScoreRepository,
-    private readonly evidenceFileRepo: EvidenceFileRepository
+    private readonly evidenceFileRepo: EvidenceFileRepository,
+    private readonly nodeScoreRepo: ProcessNodeScoreRepository
   ) {}
 
-  // lista a estrutura da tabela + pontuações do processo
+  // lista a estrutura da tabela + pontuações do processo + total de cada nó
   async listarEstruturaPontuacao(processId: number, userId: number) {
     const process = await this.processRepo.findById(processId)
     if (!process || process.deletedDate) {
@@ -38,15 +69,21 @@ export class ProcessScoreService {
 
     const tableId = process.scoringTableId
 
-    const [nodes, items, scores] = await Promise.all([
+    const [nodes, items, scores, nodeScores] = await Promise.all([
       this.tableRepo.findNodesByTableId(tableId),
       this.tableRepo.findItemsByTableId(tableId),
-      this.scoreRepo.listByProcess(processId)
+      this.scoreRepo.listByProcess(processId),
+      this.nodeScoreRepo.listByProcess(processId)
     ])
 
     const scoreByItemId = new Map<number, any>()
     scores.forEach(score => {
       scoreByItemId.set(score.itemId, score)
+    })
+
+    const nodeScoreByNodeId = new Map<number, any>()
+    nodeScores.forEach(ns => {
+      nodeScoreByNodeId.set(ns.nodeId, ns)
     })
 
     const itemsByNodeId = new Map<number, any[]>()
@@ -79,8 +116,9 @@ export class ProcessScoreService {
         unit: item.unit,
         points: item.points,
         hasMaxPoints: item.hasMaxPoints,
-        maxPoints: item.maxPoints, // 👈 NOVO: expõe pro front
+        maxPoints: item.maxPoints,
         active: item.active,
+        formulaKey: item.formulaKey,
         currentScore: score
           ? {
               processScoreId: score.idProcessScore,
@@ -95,12 +133,18 @@ export class ProcessScoreService {
     })
 
     const blocks = nodes.map(node => {
+      const nodeScore = nodeScoreByNodeId.get(node.idScoringNode)
+
       return {
         nodeId: node.idScoringNode,
         name: node.name,
         code: node.code,
         parentId: node.parentId,
         sortOrder: node.sortOrder,
+        hasFormula: node.hasFormula,
+        totalPoints: nodeScore
+          ? decimalToNumber(nodeScore.totalPoints)
+          : null,
         items: itemsByNodeId.get(node.idScoringNode) ?? []
       }
     })
@@ -151,14 +195,20 @@ export class ProcessScoreService {
       )
     }
 
-    const existingScore = await this.scoreRepo.findByProcessAndItem(processId, itemId)
+    const nodeId = item.nodeId
+
+    const existingScore = await this.scoreRepo.findByProcessAndItem(
+      processId,
+      itemId
+    )
 
     const rawQuantity = dto.quantity ?? 0
     let finalQuantity = rawQuantity
     let finalPointsNumber = 0
 
+    // ✅ Agora TODOS os itens (inclusive dentro de bloco com fórmula)
+    // calculam pontos normalmente antes da fórmula do bloco
     if (!item.hasMaxPoints) {
-      // ---- ITEM NORMAL: calcula pontos = quantidade * pontos base ----
       const quantityNumber = Number(rawQuantity)
 
       if (Number.isNaN(quantityNumber) || quantityNumber < 0) {
@@ -177,7 +227,6 @@ export class ProcessScoreService {
       finalQuantity = quantityNumber
       finalPointsNumber = quantityNumber * basePoints
     } else {
-      // ---- ITEM COM PONTUAÇÃO MÁXIMA: usuário informa os pontos finais ----
       if (
         dto.awardedPoints === undefined ||
         dto.awardedPoints === null ||
@@ -195,7 +244,6 @@ export class ProcessScoreService {
         )
       }
 
-      // maxPoints se existir, senão usa points como fallback
       let maxAllowed = NaN
       if (item.maxPoints != null) {
         maxAllowed = decimalToNumber(item.maxPoints)
@@ -209,7 +257,7 @@ export class ProcessScoreService {
         )
       }
 
-      finalQuantity = rawQuantity ?? 0 // pode manter 0, como o front está mandando
+      finalQuantity = rawQuantity ?? 0
       finalPointsNumber = requested
     }
 
@@ -219,6 +267,7 @@ export class ProcessScoreService {
     const hasEvidence = evidenceFileId !== null
     const isNonZeroScore = finalPointsNumber > 0
 
+    // ✅ Agora QUALQUER item com pontuação > 0 precisa de comprovante
     if (isNonZeroScore && !hasEvidence) {
       throw new BusinessRuleError(
         "Não é permitido lançar pontuação neste item sem anexar pelo menos um documento de comprovação."
@@ -232,6 +281,9 @@ export class ProcessScoreService {
       awardedPoints,
       evidenceFileId
     )
+
+    // recalcula o total do nó (bloco), incluindo fórmulas
+    await this.recalcularPontuacaoDoNo(processId, nodeId)
 
     return {
       processId: score.processId,
@@ -253,6 +305,60 @@ export class ProcessScoreService {
             }
           : null
     }
+  }
+
+  private async recalcularPontuacaoDoNo(processId: number, nodeId: number) {
+    const node = await this.tableRepo.findNodeById(nodeId)
+    if (!node || node.deletedDate || !node.active) {
+      return
+    }
+
+    const items = await this.tableRepo.findItemsByNodeId(nodeId)
+    const scores = await this.scoreRepo.listByProcessAndNode(processId, nodeId)
+
+    const scoreByItemId = new Map<number, (typeof scores)[number]>()
+    scores.forEach(score => {
+      scoreByItemId.set(score.itemId, score)
+    })
+
+    let totalPointsNumber = 0
+
+    if (!node.hasFormula || !node.formulaExpression) {
+      // ✅ nó normal: soma dos pontos dos itens
+      items.forEach(item => {
+        const score = scoreByItemId.get(item.idScoringItem)
+        if (score) {
+          const pts = decimalToNumber(score.awardedPoints)
+          if (!Number.isNaN(pts)) {
+            totalPointsNumber += pts
+          }
+        }
+      })
+    } else {
+      // ✅ nó com fórmula: usa os PONTOS dos itens (awardPoints) nas variáveis
+      const variables: Record<string, number> = {}
+
+      items.forEach(item => {
+        if (!item.formulaKey) {
+          return
+        }
+
+        const score = scoreByItemId.get(item.idScoringItem)
+        const rawValue = score ? score.awardedPoints : 0
+        const val = decimalToNumber(rawValue)
+
+        variables[item.formulaKey] = Number.isNaN(val) ? 0 : val
+      })
+
+      totalPointsNumber = evaluateNodeFormula(
+        node.formulaExpression,
+        variables
+      )
+    }
+
+    const totalPoints = totalPointsNumber.toFixed(2)
+
+    await this.nodeScoreRepo.upsertNodeScore(processId, nodeId, totalPoints)
   }
 
   async anexarEvidencia(params: {
@@ -444,7 +550,7 @@ export class ProcessScoreService {
     }))
   }
 
-    async obterEvidenciaConteudo(evidenceFileId: number, userId: number) {
+  async obterEvidenciaConteudo(evidenceFileId: number, userId: number) {
     const file = await this.evidenceFileRepo.findById(evidenceFileId)
 
     if (!file || file.deletedDate) {
@@ -477,5 +583,4 @@ export class ProcessScoreService {
       mimeType: file.mimeType ?? "application/pdf"
     }
   }
-
 }

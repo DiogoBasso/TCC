@@ -6,8 +6,8 @@ export interface CreateWithRolesAndDocenteInput {
   email: string
   cpf: string
   phone: string | null
-  city: string | null          // ✅ novo
-  uf: string | null            // ✅ novo
+  city: string | null
+  uf: string | null
   passwordHash: string
   roles: RoleName[]
   docenteProfile?: {
@@ -48,8 +48,8 @@ export interface UpdateUserWithRolesAndDocenteInput {
   email?: string
   cpf?: string
   phone?: string | null
-  city?: string | null      // ✅ novo
-  uf?: string | null        // ✅ novo
+  city?: string | null
+  uf?: string | null
   active?: boolean
   roles?: RoleName[]
   docenteProfile?: UpdateDocenteProfileInput
@@ -96,7 +96,7 @@ export class UserRepository {
       data: {
         name: input.name,
         email: input.email,
-        cpf: input.cpf,       // ✅ já vem só com dígitos
+        cpf: input.cpf,
         phone: input.phone,
         city: input.city,
         uf: input.uf,
@@ -141,9 +141,9 @@ export class UserRepository {
     if (input.name !== undefined) data.name = input.name
     if (input.email !== undefined) data.email = input.email
     if (input.phone !== undefined) data.phone = input.phone
+    if (input.city !== undefined) data.city = input.city
+    if (input.uf !== undefined) data.uf = input.uf
     if (input.cpf !== undefined) data.cpf = input.cpf
-    if (input.city !== undefined) data.city = input.city    // ✅
-    if (input.uf !== undefined) data.uf = input.uf          // ✅
     if (input.active !== undefined) data.active = input.active
 
     if (input.roles) {
