@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 const backend = process.env.BACKEND_URL!
-const BACKEND_REGISTER_PATH = "/public/register-professor" 
+const BACKEND_REGISTER_PATH = "/register/docente" 
 // 🔥 ajuste aqui conforme sua rota real
 
 function normalizeCpf(cpf: string) {

@@ -90,7 +90,11 @@ export class ProcessScoreRepository {
     })
   }
 
-  async updateEvidence(processId: number, itemId: number, evidenceFileId: number | null) {
+  async updateEvidence(
+    processId: number,
+    itemId: number,
+    evidenceFileId: number | null
+  ) {
     return prisma.processScore.update({
       where: {
         processId_itemId: {
@@ -108,7 +112,7 @@ export class ProcessScoreRepository {
     })
   }
 
-  // ✅ Soma de todos os pontos lançados no processo (awardedPoints)
+  // ✅ Soma simples de todos os pontos lançados no processo (SEM fórmula)
   async sumTotalAwardedPointsByProcess(processId: number): Promise<number> {
     const result = await prisma.processScore.aggregate({
       where: {
@@ -126,12 +130,88 @@ export class ProcessScoreRepository {
       return 0
     }
 
-    // Prisma.Decimal ou number
     if (typeof raw === "object" && typeof (raw as any).toNumber === "function") {
       return (raw as any).toNumber()
     }
 
     const num = Number(raw)
     return Number.isNaN(num) ? 0 : num
+  }
+
+  // ✅ Estrutura de blocos + itens + pontuações para cálculo COM fórmula
+  //
+  // Esse retorno é pensado pra casar com a lógica de árvore + computeNodeTotal
+  // que vamos usar no ProcessoService (igual à tela de pontuação).
+  async findBlocksWithScoresByProcess(processId: number) {
+    // 1) pega a tabela de pontuação vinculada ao processo
+    const process = await prisma.careerProcess.findUnique({
+      where: {
+        idProcess: processId,
+        deletedDate: null
+      },
+      select: {
+        scoringTableId: true
+      }
+    })
+
+    if (!process) {
+      return []
+    }
+
+    // 2) busca todos os nós (blocos) da tabela, com itens e os scores desse processo
+    const nodes = await prisma.scoringNode.findMany({
+      where: {
+        scoringTableId: process.scoringTableId,
+        deletedDate: null
+      },
+      include: {
+        items: {
+          where: {
+            deletedDate: null
+          },
+          include: {
+            ProcessScore: {
+              where: {
+                processId,
+                deletedDate: null
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        sortOrder: "asc"
+      }
+    })
+
+    // 3) mapeia pro formato que o service vai usar
+    return nodes.map(node => ({
+      nodeId: node.idScoringNode,
+      parentId: node.parentId,
+      sortOrder: node.sortOrder,
+      hasFormula: node.hasFormula,
+      formulaExpression: node.formulaExpression,
+      items: node.items.map(item => {
+        const score = item.ProcessScore[0] ?? null
+
+        return {
+          itemId: item.idScoringItem,
+          // converte Decimal -> number pra facilitar a conta
+          points: Number(item.points),
+          hasMaxPoints: item.hasMaxPoints,
+          maxPoints:
+            item.maxPoints !== null && item.maxPoints !== undefined
+              ? Number(item.maxPoints)
+              : null,
+          formulaKey: item.formulaKey,
+          currentScore: score
+            ? {
+                quantity: score.quantity,
+                awardedPoints: Number(score.awardedPoints)
+              }
+            : null
+        }
+      })
+    }))
   }
 }

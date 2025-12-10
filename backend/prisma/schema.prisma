@@ -165,13 +165,14 @@ model ScoringItem {
 }
 
 model ProcessNodeScore {
-  idProcessNodeScore Int       @id @default(autoincrement())
-  processId          Int
-  nodeId             Int
-  totalPoints        Decimal   @db.Decimal(10, 2)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  deletedDate        DateTime?
+  idProcessNodeScore   Int       @id @default(autoincrement())
+  processId            Int
+  nodeId               Int
+  totalPoints          Decimal   @db.Decimal(10, 2)
+  evaluatorTotalPoints Decimal?  @db.Decimal(10, 2)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedDate          DateTime?
 
   process CareerProcess @relation(fields: [processId], references: [idProcess], onDelete: Cascade)
   node    ScoringNode   @relation(fields: [nodeId], references: [idScoringNode], onDelete: Cascade)
@@ -213,8 +214,11 @@ model CareerProcess {
   classeDestino   String        @db.VarChar(20)
   nivelDestino    String        @db.VarChar(20)
 
-  user  User         @relation(fields: [userId], references: [idUser], onDelete: Restrict)
-  table ScoringTable @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Restrict)
+  user              User         @relation(fields: [userId], references: [idUser], onDelete: Restrict)
+  table             ScoringTable @relation(fields: [scoringTableId], references: [idScoringTable], onDelete: Restrict)
+  finalPoints       Decimal?     @db.Decimal(10, 2)
+  evaluationOpinion String?      @db.Text
+  evaluatorUserIds  Json?
 
   scores               ProcessScore[]
   ProcessStatusHistory ProcessStatusHistory[]
@@ -235,6 +239,9 @@ model ProcessScore {
 
   evidenceFileId Int?
   evidenceFile   EvidenceFile? @relation(fields: [evidenceFileId], references: [idEvidenceFile], onDelete: Restrict)
+
+  evaluatorAwardedPoints Decimal? @db.Decimal(10, 2)
+  evaluatorComment       String?  @db.VarChar(500)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Modal from "@/components/Modal"
+import { translateBackendError } from "@/utils/translateBackendError"
 
 // helpers SEM regex
 function onlyDigits(input: string) {
@@ -64,6 +66,15 @@ const UF_OPTIONS = [
   "RJ","RN","RS","RO","RR","SC","SP","SE","TO"
 ]
 
+type ModalVariant = "success" | "error" | "info"
+
+type ModalState = {
+  open: boolean
+  title: string
+  message: string
+  variant: ModalVariant
+}
+
 export default function RegisterProfessorPage() {
   const router = useRouter()
 
@@ -93,10 +104,38 @@ export default function RegisterProfessorPage() {
   const [role, setRole] = useState<string | "">("")
   const [immediateSupervisor, setImmediateSupervisor] = useState<string | "">("")
 
-  // ui
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // ---- MODAL (mesmo padrão do restante do sistema) -------------------------
+  const [modal, setModal] = useState<ModalState>({
+    open: false,
+    title: "",
+    message: "",
+    variant: "info"
+  })
+
+  // se true, ao fechar modal redireciona para /login
+  const [redirectOnClose, setRedirectOnClose] = useState(false)
+
+  function openModal(payload: Omit<ModalState, "open">) {
+    setModal({
+      open: true,
+      ...payload
+    })
+  }
+
+  function closeModal() {
+    setModal(prev => ({
+      ...prev,
+      open: false
+    }))
+
+    if (redirectOnClose) {
+      router.push("/login")
+    }
+  }
+
+  // -------------------------------------------------------------------------
 
   function onPhoneChange(e: React.ChangeEvent<HTMLInputElement>) {
     const formatted = formatPhoneBR(e.target.value)
@@ -105,24 +144,42 @@ export default function RegisterProfessorPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
+
+    // qualquer envio reseta o redirectOnClose;
+    // só fica true explicitamente no sucesso
+    setRedirectOnClose(false)
 
     // validações básicas no front
     if (!name || !email || !cpf || !password || !phone || !city || !uf) {
-      setError("Preencha nome, e-mail, CPF, telefone, cidade, UF e senha.")
+      openModal({
+        title: "Dados obrigatórios",
+        message: "Preencha nome, e-mail, CPF, telefone, cidade, UF e senha.",
+        variant: "error"
+      })
       return
     }
     if (!validateCPFBasic(cpf)) {
-      setError("CPF inválido.")
+      openModal({
+        title: "CPF inválido",
+        message: "Informe um CPF com 11 dígitos numéricos.",
+        variant: "error"
+      })
       return
     }
     if (!validatePhoneBasic(phone)) {
-      setError("Telefone inválido (use 10 ou 11 dígitos).")
+      openModal({
+        title: "Telefone inválido",
+        message: "Telefone inválido. Use 10 ou 11 dígitos (fixo ou celular).",
+        variant: "error"
+      })
       return
     }
     if (!siape || !classLevel || !startInterstice || !educationLevel) {
-      setError("Preencha os campos obrigatórios do perfil docente.")
+      openModal({
+        title: "Perfil docente incompleto",
+        message: "Preencha os campos obrigatórios do perfil docente.",
+        variant: "error"
+      })
       return
     }
 
@@ -162,23 +219,38 @@ export default function RegisterProfessorPage() {
       const json = await r.json().catch(() => ({}))
 
       if (!r.ok) {
-        const msg =
-          json?.message ||
-          json?.error ||
-          (Array.isArray(json?.data) ? json.data.join(", ") : null) ||
-          "Falha ao cadastrar"
-        setError(msg)
+        const friendlyMessage = translateBackendError(json, "register")
+
+        openModal({
+          title: "Falha no cadastro",
+          message: friendlyMessage,
+          variant: "error"
+        })
+
         setLoading(false)
+        setRedirectOnClose(false)
         return
       }
 
-      setSuccess("Cadastro realizado com sucesso! Redirecionando para login...")
-      setLoading(false)
+      openModal({
+        title: "Cadastro realizado",
+        message: "Cadastro realizado com sucesso! Você já pode fazer login.",
+        variant: "success"
+      })
+
+      // só no sucesso marcamos pra redirecionar quando o modal for fechado
+      setRedirectOnClose(true)
+
       clearForm()
-      setTimeout(() => router.push("/login"), 1200)
-    } catch {
-      setError("Erro de conexão. Tente novamente.")
       setLoading(false)
+    } catch {
+      openModal({
+        title: "Erro de conexão",
+        message: "Não foi possível conectar com o servidor. Tente novamente em instantes.",
+        variant: "error"
+      })
+      setLoading(false)
+      setRedirectOnClose(false)
     }
   }
 
@@ -212,338 +284,337 @@ export default function RegisterProfessorPage() {
     "focus:ring-2 focus:ring-[var(--brand)]"
 
   return (
-    <div className="min-h-screen bg-[var(--surface-muted)] flex items-center justify-center p-4">
-      <form
-        onSubmit={onSubmit}
-        className="
-          w-full max-w-3xl
-          bg-[var(--surface-card)]
-          rounded-2xl shadow-sm
-          border border-[var(--border-subtle)]
-          p-6 space-y-4
-        "
-      >
-        <h1 className="text-2xl font-semibold mb-2 text-[var(--text-primary)]">
-          Cadastro de Docente
-        </h1>
+    <>
+      <Modal
+        open={modal.open}
+        title={modal.title}
+        message={modal.message}
+        variant={modal.variant}
+        onClose={closeModal}
+      />
 
-        {error && (
-          <p className="text-sm text-[var(--danger-text-strong)] bg-[var(--danger-bg)] border border-[var(--danger-border)] rounded-xl px-3 py-2">
-            {error}
-          </p>
-        )}
-        {success && (
-          <p className="text-sm text-[var(--success-text-strong)] bg-[var(--success-bg)] border border-[var(--success-border)] rounded-xl px-3 py-2">
-            {success}
-          </p>
-        )}
+      <div className="min-h-screen bg-[var(--surface-muted)] flex items-center justify-center p-4">
+        <form
+          onSubmit={onSubmit}
+          className="
+            w-full max-w-3xl
+            bg-[var(--surface-card)]
+            rounded-2xl shadow-sm
+            border border-[var(--border-subtle)]
+            p-6 space-y-4
+          "
+        >
+          <h1 className="text-2xl font-semibold mb-2 text-[var(--text-primary)]">
+            Cadastro de Docente
+          </h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Dados pessoais */}
-          <div className="md:col-span-2">
-            <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
-              Dados pessoais
-            </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Dados pessoais */}
+            <div className="md:col-span-2">
+              <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
+                Dados pessoais
+              </h2>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Nome completo *
+              </label>
+              <input
+                className={inputClass}
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Seu nome"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                E-mail *
+              </label>
+              <input
+                type="email"
+                className={inputClass}
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="seu@email.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                CPF *
+              </label>
+              <input
+                className={inputClass}
+                value={cpf}
+                onChange={e => setCpf(e.target.value)}
+                placeholder="000.000.000-00"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Senha *
+              </label>
+              <input
+                type="password"
+                className={inputClass}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="mínimo 8 caracteres"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Telefone *
+              </label>
+              <input
+                className={inputClass}
+                value={phone}
+                onChange={onPhoneChange}
+                placeholder="(11) 91234-5678"
+                inputMode="tel"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Cidade *
+              </label>
+              <input
+                className={inputClass}
+                value={city}
+                onChange={e => setCity(e.target.value)}
+                placeholder="Ex.: Santa Maria"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                UF *
+              </label>
+              <select
+                className={inputClass}
+                value={uf}
+                onChange={e => setUf(e.target.value)}
+              >
+                <option value="">Selecione...</option>
+                {UF_OPTIONS.map(sigla => (
+                  <option key={sigla} value={sigla}>
+                    {sigla}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Perfil Docente */}
+            <div className="md:col-span-2 mt-4">
+              <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
+                Perfil do Docente
+              </h2>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                SIAPE *
+              </label>
+              <input
+                className={inputClass}
+                value={siape}
+                onChange={e => setSiape(e.target.value)}
+                placeholder="SIAPE"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Classe / Nível *
+              </label>
+              <select
+                className={inputClass}
+                value={classLevel}
+                onChange={e => setClassLevel(e.target.value)}
+              >
+                <option value="">Selecione...</option>
+                {CLASS_LEVEL_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Início do Interstício *
+              </label>
+              <input
+                type="date"
+                className={inputClass}
+                value={startInterstice}
+                onChange={e => setStartInterstice(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Escolaridade *
+              </label>
+              <input
+                className={inputClass}
+                value={educationLevel}
+                onChange={e => setEducationLevel(e.target.value)}
+                placeholder="Graduação, Mestrado, Doutorado..."
+              />
+            </div>
+
+            {/* opcionais */}
+            <div className="md:col-span-2 mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Aperfeiçoamento
+                </label>
+                <input
+                  className={inputClass}
+                  value={improvement}
+                  onChange={e => setImprovement(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Especialização
+                </label>
+                <input
+                  className={inputClass}
+                  value={specialization}
+                  onChange={e => setSpecialization(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Mestrado
+                </label>
+                <input
+                  className={inputClass}
+                  value={mastersDegree}
+                  onChange={e => setMastersDegree(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Doutorado
+                </label>
+                <input
+                  className={inputClass}
+                  value={doctorate}
+                  onChange={e => setDoctorate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Lotação / Atuação
+                </label>
+                <input
+                  className={inputClass}
+                  value={assignment}
+                  onChange={e => setAssignment(e.target.value)}
+                  placeholder="Ex.: Campus X"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Departamento
+                </label>
+                <input
+                  className={inputClass}
+                  value={department}
+                  onChange={e => setDepartment(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Divisão
+                </label>
+                <input
+                  className={inputClass}
+                  value={division}
+                  onChange={e => setDivision(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Função
+                </label>
+                <input
+                  className={inputClass}
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Chefia imediata
+                </label>
+                <input
+                  className={inputClass}
+                  value={immediateSupervisor}
+                  onChange={e => setImmediateSupervisor(e.target.value)}
+                />
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Nome completo *
-            </label>
-            <input
-              className={inputClass}
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Seu nome"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              E-mail *
-            </label>
-            <input
-              type="email"
-              className={inputClass}
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="seu@email.com"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              CPF *
-            </label>
-            <input
-              className={inputClass}
-              value={cpf}
-              onChange={e => setCpf(e.target.value)}
-              placeholder="000.000.000-00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Senha *
-            </label>
-            <input
-              type="password"
-              className={inputClass}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="mínimo 8 caracteres"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Telefone *
-            </label>
-            <input
-              className={inputClass}
-              value={phone}
-              onChange={onPhoneChange}
-              placeholder="(11) 91234-5678"
-              inputMode="tel"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Cidade *
-            </label>
-            <input
-              className={inputClass}
-              value={city}
-              onChange={e => setCity(e.target.value)}
-              placeholder="Ex.: Santa Maria"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              UF *
-            </label>
-            <select
-              className={inputClass}
-              value={uf}
-              onChange={e => setUf(e.target.value)}
+          <div className="flex items-center gap-3 mt-6">
+            <button
+              type="submit"
+              disabled={loading}
+              className="
+                px-4 py-2 rounded-xl text-sm font-medium
+                bg-[var(--btn-primary-bg)]
+                text-[var(--btn-primary-text)]
+                hover:bg-[var(--btn-primary-hover-bg)]
+                disabled:opacity-50
+              "
             >
-              <option value="">Selecione...</option>
-              {UF_OPTIONS.map(sigla => (
-                <option key={sigla} value={sigla}>
-                  {sigla}
-                </option>
-              ))}
-            </select>
-          </div>
+              {loading ? "Enviando..." : "Cadastrar"}
+            </button>
 
-          {/* Perfil Docente */}
-          <div className="md:col-span-2 mt-4">
-            <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
-              Perfil do Docente
-            </h2>
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              SIAPE *
-            </label>
-            <input
-              className={inputClass}
-              value={siape}
-              onChange={e => setSiape(e.target.value)}
-              placeholder="SIAPE"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Classe / Nível *
-            </label>
-            <select
-              className={inputClass}
-              value={classLevel}
-              onChange={e => setClassLevel(e.target.value)}
+            <button
+              type="button"
+              onClick={clearForm}
+              className="
+                px-4 py-2 rounded-xl text-sm
+                border border-[var(--border-subtle)]
+                text-[var(--text-secondary)]
+                hover:bg-[var(--surface-muted)]
+              "
             >
-              <option value="">Selecione...</option>
-              {CLASS_LEVEL_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              Limpar
+            </button>
+
+            <a
+              href="/login"
+              className="ml-auto text-sm text-[var(--brand)] hover:underline"
+            >
+              Já tenho conta
+            </a>
           </div>
 
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Início do Interstício *
-            </label>
-            <input
-              type="date"
-              className={inputClass}
-              value={startInterstice}
-              onChange={e => setStartInterstice(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-              Escolaridade *
-            </label>
-            <input
-              className={inputClass}
-              value={educationLevel}
-              onChange={e => setEducationLevel(e.target.value)}
-              placeholder="Graduação, Mestrado, Doutorado..."
-            />
-          </div>
-
-          {/* opcionais */}
-          <div className="md:col-span-2 mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Aperfeiçoamento
-              </label>
-              <input
-                className={inputClass}
-                value={improvement}
-                onChange={e => setImprovement(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Especialização
-              </label>
-              <input
-                className={inputClass}
-                value={specialization}
-                onChange={e => setSpecialization(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Mestrado
-              </label>
-              <input
-                className={inputClass}
-                value={mastersDegree}
-                onChange={e => setMastersDegree(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Doutorado
-              </label>
-              <input
-                className={inputClass}
-                value={doctorate}
-                onChange={e => setDoctorate(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Lotação / Atuação
-              </label>
-              <input
-                className={inputClass}
-                value={assignment}
-                onChange={e => setAssignment(e.target.value)}
-                placeholder="Ex.: Campus X"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Departamento
-              </label>
-              <input
-                className={inputClass}
-                value={department}
-                onChange={e => setDepartment(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Divisão
-              </label>
-              <input
-                className={inputClass}
-                value={division}
-                onChange={e => setDivision(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Função
-              </label>
-              <input
-                className={inputClass}
-                value={role}
-                onChange={e => setRole(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
-                Chefia imediata
-              </label>
-              <input
-                className={inputClass}
-                value={immediateSupervisor}
-                onChange={e => setImmediateSupervisor(e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 mt-6">
-          <button
-            type="submit"
-            disabled={loading}
-            className="
-              px-4 py-2 rounded-xl text-sm font-medium
-              bg-[var(--btn-primary-bg)]
-              text-[var(--btn-primary-text)]
-              hover:bg-[var(--btn-primary-hover-bg)]
-              disabled:opacity-50
-            "
-          >
-            {loading ? "Enviando..." : "Cadastrar"}
-          </button>
-
-          <button
-            type="button"
-            onClick={clearForm}
-            className="
-              px-4 py-2 rounded-xl text-sm
-              border border-[var(--border-subtle)]
-              text-[var(--text-secondary)]
-              hover:bg-[var(--surface-muted)]
-            "
-          >
-            Limpar
-          </button>
-
-          <a
-            href="/login"
-            className="ml-auto text-sm text-[var(--brand)] hover:underline"
-          >
-            Já tenho conta
-          </a>
-        </div>
-
-        <p className="text-xs text-[var(--text-secondary)] mt-3">
-          Campos com * são obrigatórios
-        </p>
-      </form>
-    </div>
+          <p className="text-xs text-[var(--text-secondary)] mt-3">
+            Campos com * são obrigatórios
+          </p>
+        </form>
+      </div>
+    </>
   )
 }

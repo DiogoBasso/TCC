@@ -71,7 +71,7 @@ export default function LoginPage() {
 
       {/* NOME DO SISTEMA FORA DO CARD */}
       <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-6 text-center">
-        Nome Do Sistema
+        SEC-EBTT
       </h1>
 
       <form
@@ -152,6 +152,16 @@ export default function LoginPage() {
         >
           {loading ? "Entrando..." : "Entrar"}
         </button>
+
+        {/* ESQUECI MINHA SENHA */}
+        <div className="pt-2 text-center">
+          <a
+            href="/forgot-password"
+            className="text-sm text-[var(--brand)] hover:underline"
+          >
+            Esqueci minha senha
+          </a>
+        </div>
 
         {/* CADASTRO */}
         <div className="pt-2 text-center">

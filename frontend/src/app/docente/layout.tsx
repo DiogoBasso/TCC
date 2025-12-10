@@ -11,7 +11,7 @@ export default function DocenteLayout({ children }: { children: ReactNode }) {
           {/* Branding do sistema */}
           <div className="flex flex-col">
             <span className="text-sm font-bold tracking-wide">
-              Sistema de Gestão CPPD / EBTT
+              SEC-EBTT
             </span>
             <span className="text-[11px] text-[var(--navbar-text-muted)]">
               Módulo Docente

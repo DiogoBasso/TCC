@@ -12,7 +12,7 @@ export default function Home() {
     >
       {/* Nome do sistema */}
       <h1 className="text-3xl font-semibold text-[var(--text-primary)] mb-8">
-        Sistema de Progressão e Promoção Docente
+        SEC-EBTT
       </h1>
 
       {/* Card principal */}

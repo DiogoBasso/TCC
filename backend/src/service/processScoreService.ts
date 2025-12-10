@@ -142,6 +142,7 @@ export class ProcessScoreService {
         parentId: node.parentId,
         sortOrder: node.sortOrder,
         hasFormula: node.hasFormula,
+        formulaExpression: node.formulaExpression,
         totalPoints: nodeScore
           ? decimalToNumber(nodeScore.totalPoints)
           : null,
@@ -159,6 +160,8 @@ export class ProcessScoreService {
   }
 
   // salvar/atualizar pontuação de um item
+  // src/service/processScoreService.ts
+
   async salvarPontuacaoItem(
     processId: number,
     userId: number,
@@ -263,27 +266,31 @@ export class ProcessScoreService {
 
     const awardedPoints = finalPointsNumber.toFixed(2)
 
-    const evidenceFileId = existingScore?.evidenceFileId ?? null
-    const hasEvidence = evidenceFileId !== null
+    const hadEvidenceBefore = existingScore?.evidenceFileId != null
     const isNonZeroScore = finalPointsNumber > 0
 
-    // ✅ Agora QUALQUER item com pontuação > 0 precisa de comprovante
-    if (isNonZeroScore && !hasEvidence) {
+    if (isNonZeroScore && !hadEvidenceBefore) {
       throw new BusinessRuleError(
         "Não é permitido lançar pontuação neste item sem anexar pelo menos um documento de comprovação."
       )
     }
 
-    const score = await this.scoreRepo.upsertScore(
+    // primeiro atualiza quantidade/pontuação, mantendo o vínculo atual (se houver)
+    let score = await this.scoreRepo.upsertScore(
       processId,
       itemId,
       finalQuantity,
       awardedPoints,
-      evidenceFileId
+      existingScore?.evidenceFileId ?? null
     )
 
+    // ✅ NOVO: se a nova pontuação for 0, remove o comprovante do item
+    if (!isNonZeroScore && hadEvidenceBefore) {
+      score = await this.scoreRepo.updateEvidence(processId, itemId, null)
+    }
+
     // recalcula o total do nó (bloco), incluindo fórmulas
-    await this.recalcularPontuacaoDoNo(processId, nodeId)
+    await this.recalcularPontuacoesDaTabela(processId)
 
     return {
       processId: score.processId,
@@ -307,59 +314,181 @@ export class ProcessScoreService {
     }
   }
 
-  private async recalcularPontuacaoDoNo(processId: number, nodeId: number) {
-    const node = await this.tableRepo.findNodeById(nodeId)
-    if (!node || node.deletedDate || !node.active) {
-      return
+  private async recalcularPontuacoesDaTabela(processId: number) {
+    // carrega o processo para pegar a tabela
+    const process = await this.processRepo.findById(processId)
+    if (!process || process.deletedDate) {
+      throw new NotFoundError("Processo não encontrado")
     }
 
-    const items = await this.tableRepo.findItemsByNodeId(nodeId)
-    const scores = await this.scoreRepo.listByProcessAndNode(processId, nodeId)
+    const tableId = process.scoringTableId
 
-    const scoreByItemId = new Map<number, (typeof scores)[number]>()
+    // pega toda a estrutura necessária
+    const [nodes, items, scores] = await Promise.all([
+      this.tableRepo.findNodesByTableId(tableId),
+      this.tableRepo.findItemsByTableId(tableId),
+      this.scoreRepo.listByProcess(processId)
+    ])
+
+    // mapas auxiliares
+    const nodeById = new Map<number, any>()
+    const childrenByParentId = new Map<number | null, number[]>()
+    const itemsByNodeId = new Map<number, any[]>()
+    const scoreByItemId = new Map<number, any>()
+
+    nodes.forEach(node => {
+      nodeById.set(node.idScoringNode, node)
+
+      const parentId = node.parentId ?? null
+      const list = childrenByParentId.get(parentId) ?? []
+      list.push(node.idScoringNode)
+      childrenByParentId.set(parentId, list)
+    })
+
+    items.forEach(item => {
+      const list = itemsByNodeId.get(item.nodeId) ?? []
+      list.push(item)
+      itemsByNodeId.set(item.nodeId, list)
+    })
+
     scores.forEach(score => {
       scoreByItemId.set(score.itemId, score)
     })
 
-    let totalPointsNumber = 0
+    // memoização de totais por nodeId
+    const totalByNodeId = new Map<number, number>()
 
-    if (!node.hasFormula || !node.formulaExpression) {
-      // ✅ nó normal: soma dos pontos dos itens
-      items.forEach(item => {
+    const computeTotalForNode = (nodeId: number): number => {
+      if (totalByNodeId.has(nodeId)) {
+        return totalByNodeId.get(nodeId)!
+      }
+
+      const node = nodeById.get(nodeId)
+      if (!node) {
+        totalByNodeId.set(nodeId, 0)
+        return 0
+      }
+
+      const nodeItems = itemsByNodeId.get(nodeId) ?? []
+
+      // 1) soma "simples" dos pontos (awardedPoints) dos itens do nó
+      let baseSum = 0
+      nodeItems.forEach((item: any) => {
         const score = scoreByItemId.get(item.idScoringItem)
-        if (score) {
-          const pts = decimalToNumber(score.awardedPoints)
-          if (!Number.isNaN(pts)) {
-            totalPointsNumber += pts
-          }
+        if (!score) return
+
+        const pts = decimalToNumber(score.awardedPoints)
+        if (!Number.isNaN(pts)) {
+          baseSum += pts
         }
       })
-    } else {
-      // ✅ nó com fórmula: usa os PONTOS dos itens (awardPoints) nas variáveis
-      const variables: Record<string, number> = {}
 
-      items.forEach(item => {
-        if (!item.formulaKey) {
-          return
+      let ownTotal = baseSum
+
+      // 2) se o nó tiver fórmula, usamos QUANTITY como variável na fórmula
+      if (node.hasFormula && node.formulaExpression) {
+        const vars: Record<string, number> = {}
+
+        nodeItems.forEach((item: any) => {
+          if (!item.formulaKey) return
+
+          const score = scoreByItemId.get(item.idScoringItem)
+          const rawQuantity = score ? score.quantity : 0
+          const q = decimalToNumber(rawQuantity)
+
+          vars[item.formulaKey] = Number.isNaN(q) ? 0 : q
+        })
+
+        if (Object.keys(vars).length === 0) {
+          ownTotal = 0
+        } else {
+          // aqui a fórmula já deve devolver o total de pontos do bloco
+          ownTotal = evaluateNodeFormula(node.formulaExpression, vars)
         }
+      }
 
-        const score = scoreByItemId.get(item.idScoringItem)
-        const rawValue = score ? score.awardedPoints : 0
-        const val = decimalToNumber(rawValue)
-
-        variables[item.formulaKey] = Number.isNaN(val) ? 0 : val
-      })
-
-      totalPointsNumber = evaluateNodeFormula(
-        node.formulaExpression,
-        variables
+      // 3) total dos filhos (recursivo)
+      const childrenIds = childrenByParentId.get(nodeId) ?? []
+      const childrenTotal = childrenIds.reduce(
+        (acc, childId) => acc + computeTotalForNode(childId),
+        0
       )
+
+      const total = ownTotal + childrenTotal
+      totalByNodeId.set(nodeId, total)
+      return total
     }
 
-    const totalPoints = totalPointsNumber.toFixed(2)
+    // calcula total para todos os nós (inclui pais sem itens, como DOC)
+    nodes.forEach(node => {
+      computeTotalForNode(node.idScoringNode)
+    })
 
-    await this.nodeScoreRepo.upsertNodeScore(processId, nodeId, totalPoints)
+    // persiste os totais em process_node_score
+    await Promise.all(
+      nodes.map(node => {
+        const total = totalByNodeId.get(node.idScoringNode) ?? 0
+        const totalStr = total.toFixed(2)
+
+        return this.nodeScoreRepo.upsertNodeScore(
+          processId,
+          node.idScoringNode,
+          totalStr
+        )
+      })
+    )
   }
+  // private async recalcularPontuacaoDoNo(processId: number, nodeId: number) {
+  //   const node = await this.tableRepo.findNodeById(nodeId)
+  //   if (!node || node.deletedDate || !node.active) {
+  //     return
+  //   }
+
+  //   const items = await this.tableRepo.findItemsByNodeId(nodeId)
+  //   const scores = await this.scoreRepo.listByProcessAndNode(processId, nodeId)
+
+  //   const scoreByItemId = new Map<number, (typeof scores)[number]>()
+  //   scores.forEach(score => {
+  //     scoreByItemId.set(score.itemId, score)
+  //   })
+
+  //   let totalPointsNumber = 0
+
+  //   if (!node.hasFormula || !node.formulaExpression) {
+  //     items.forEach(item => {
+  //       const score = scoreByItemId.get(item.idScoringItem)
+  //       if (score) {
+  //         const pts = decimalToNumber(score.awardedPoints)
+  //         if (!Number.isNaN(pts)) {
+  //           totalPointsNumber += pts
+  //         }
+  //       }
+  //     })
+  //   } else {
+  //     const variables: Record<string, number> = {}
+
+  //     items.forEach(item => {
+  //       if (!item.formulaKey) {
+  //         return
+  //       }
+
+  //       const score = scoreByItemId.get(item.idScoringItem)
+  //       const rawValue = score ? score.awardedPoints : 0
+  //       const val = decimalToNumber(rawValue)
+
+  //       variables[item.formulaKey] = Number.isNaN(val) ? 0 : val
+  //     })
+
+  //     totalPointsNumber = evaluateNodeFormula(
+  //       node.formulaExpression,
+  //       variables
+  //     )
+  //   }
+
+  //   const totalPoints = totalPointsNumber.toFixed(2)
+
+  //   await this.nodeScoreRepo.upsertNodeScore(processId, nodeId, totalPoints)
+  // }
 
   async anexarEvidencia(params: {
     processId: number

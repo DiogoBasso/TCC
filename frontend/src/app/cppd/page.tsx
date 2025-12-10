@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
-import HeaderActionsServer from "@/components/HeaderActionsServer"
 
 export default async function CppdPage() {
   const jar = await cookies()
@@ -8,30 +7,70 @@ export default async function CppdPage() {
   if (!access) redirect("/login")
 
   return (
-    <main
-      className="
-        min-h-screen
-        p-6
-        flex flex-col
-        bg-[var(--surface-muted)]
-      "
-    >
-      <header
-        className="
-          flex justify-between items-center
-          mb-6 gap-4
-        "
-      >
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
-          Módulo CPPD
-        </h1>
+    <main className="min-h-[60vh]">
+      <div className="max-w-4xl mx-auto space-y-8">
 
-        <HeaderActionsServer />
-      </header>
+        {/* Cabeçalho */}
+        <header className="flex flex-wrap justify-between items-center gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
+              Módulo CPPD
+            </h1>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Acompanhe, analise e registre pareceres sobre os processos dos docentes.
+            </p>
+          </div>
+        </header>
 
-      <section className="text-[var(--text-primary)]">
-        <p className="mt-2">Bem-vindo!</p>
-      </section>
+        {/* Cards / Conteúdo */}
+        <section className="space-y-6">
+
+          <div className="bg-[var(--surface-bg)] border border-[var(--border-subtle)]
+                          rounded-2xl shadow-sm p-6 space-y-2">
+            <p className="text-[var(--text-primary)]">
+              Bem-vindo ao módulo da CPPD! Aqui você pode consultar os processos
+              submetidos, acompanhar o fluxo de análise e registrar decisões sobre
+              progressão e promoção na carreira docente EBTT.
+            </p>
+          </div>
+
+          {/* Atalhos rápidos */}
+          <div className="grid sm:grid-cols-2 gap-4">
+
+            <a
+              href="/cppd/processos"
+              className="block bg-[var(--surface-bg)] border border-[var(--border-subtle)]
+                         hover:border-[var(--border-strong)] transition
+                         rounded-2xl p-5 shadow-sm"
+            >
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                Processos
+              </h2>
+              <p className="text-sm text-[var(--text-secondary)] mt-1">
+                Visualize processos em rascunho, submetidos, em análise, aprovados,
+                devolvidos ou indeferidos.
+              </p>
+            </a>
+
+            <a
+              href="/cppd/tabelas"
+              className="block bg-[var(--surface-bg)] border border-[var(--border-subtle)]
+                         hover:border-[var(--border-strong)] transition
+                         rounded-2xl p-5 shadow-sm"
+            >
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                Tabelas de pontuação
+              </h2>
+              <p className="text-sm text-[var(--text-secondary)] mt-1">
+                Gerencie as tabelas de atividades, pesos e critérios utilizados
+                pela CPPD na avaliação dos processos.
+              </p>
+            </a>
+
+          </div>
+        </section>
+
+      </div>
     </main>
   )
 }

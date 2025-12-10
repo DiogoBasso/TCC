@@ -54,6 +54,7 @@ type ScoringItem = {
   hasMaxPoints: boolean
   maxPoints?: string | number | null
   active: boolean
+  formulaKey: string | null
   currentScore: CurrentScore | null
 }
 
@@ -64,6 +65,9 @@ type BlockNode = {
   parentId: number | null
   sortOrder: number
   items: ScoringItem[]
+  hasFormula: boolean
+  formulaExpression: string | null
+  totalPoints: number | null
 }
 
 type EstruturaPontuacao = {
@@ -82,6 +86,9 @@ type TreeNode = {
   sortOrder: number
   items: ScoringItem[]
   children: TreeNode[]
+  hasFormula: boolean
+  formulaExpression: string | null
+  totalPoints: number | null
 }
 
 type UserEvidenceFile = {
@@ -108,41 +115,6 @@ type PendingScore = {
   itemId: number
   quantity: number
   awardedPoints: string
-}
-
-// respostas do backend
-type SaveScoreResponse = {
-  processId: number
-  itemId: number
-  processScoreId: number
-  quantity: number
-  awardedPoints: string
-  evidence: {
-    evidenceFileId: number
-    originalName: string
-    url: string
-    mimeType: string | null
-    sizeBytes: number | null
-  } | null
-}
-
-type EvidenceUpdateResponse = {
-  processScoreId: number
-  itemId: number
-  evidence: {
-    evidenceFileId: number
-    originalName: string
-    url: string
-    mimeType: string | null
-    sizeBytes: number | null
-  }
-}
-
-// resposta do envio do processo
-type EnviarProcessoResponse = {
-  processId: number
-  status: ProcessStatus
-  totalPoints: number
 }
 
 // ícones simples em SVG
@@ -263,8 +235,6 @@ export default function ProcessoPontuacaoPage() {
     >
   >({})
 
-  const [sending, setSending] = useState(false)
-
   function openModal(payload: Omit<ModalState, "open">) {
     setModal({
       open: true,
@@ -287,7 +257,10 @@ export default function ProcessoPontuacaoPage() {
         parentId: b.parentId,
         sortOrder: b.sortOrder,
         items: b.items,
-        children: []
+        children: [],
+        hasFormula: b.hasFormula,
+        formulaExpression: b.formulaExpression,
+        totalPoints: b.totalPoints
       })
     })
 
@@ -379,25 +352,11 @@ export default function ProcessoPontuacaoPage() {
       estrutura.status === "RETURNED" ||
       estrutura.status === "REJECTED")
 
-  // ✅ total de pontos do processo (soma de todos os itens)
   const totalProcessPoints = useMemo(() => {
-    if (!estrutura) return 0
+    if (!treeRoots || treeRoots.length === 0) return 0
 
-    let sum = 0
-
-    estrutura.blocks.forEach(block => {
-      block.items.forEach(item => {
-        if (item.currentScore) {
-          const num = Number(item.currentScore.awardedPoints)
-          if (!Number.isNaN(num)) {
-            sum += num
-          }
-        }
-      })
-    })
-
-    return sum
-  }, [estrutura])
+    return treeRoots.reduce((acc, node) => acc + computeNodeTotal(node), 0)
+  }, [treeRoots])
 
   const hasMinimumPoints = totalProcessPoints >= 120
 
@@ -564,18 +523,18 @@ export default function ProcessoPontuacaoPage() {
   }
 
   // atualiza só um item na estrutura e na árvore depois de salvar pontuação
-  function applySavedScoreToState(itemId: number, data: SaveScoreResponse) {
+  function applySavedScoreToState(itemId: number, data: any) {
     const newEvidenceArray: Evidence[] =
       data.evidence != null
         ? [
-            {
-              evidenceFileId: data.evidence.evidenceFileId,
-              originalName: data.evidence.originalName,
-              url: data.evidence.url,
-              mimeType: data.evidence.mimeType,
-              sizeBytes: data.evidence.sizeBytes
-            }
-          ]
+          {
+            evidenceFileId: data.evidence.evidenceFileId,
+            originalName: data.evidence.originalName,
+            url: data.evidence.url,
+            mimeType: data.evidence.mimeType,
+            sizeBytes: data.evidence.sizeBytes
+          }
+        ]
         : []
 
     setEstrutura(prev => {
@@ -588,18 +547,13 @@ export default function ProcessoPontuacaoPage() {
           items: block.items.map(i => {
             if (i.itemId !== itemId) return i
 
-            const existingEvidence =
-              data.evidence != null
-                ? newEvidenceArray
-                : i.currentScore?.evidences ?? []
-
             return {
               ...i,
               currentScore: {
                 processScoreId: data.processScoreId,
                 quantity: data.quantity,
                 awardedPoints: data.awardedPoints,
-                evidences: existingEvidence
+                evidences: newEvidenceArray
               }
             }
           })
@@ -609,18 +563,13 @@ export default function ProcessoPontuacaoPage() {
 
     setTreeRoots(prev =>
       updateItemInTree(prev, itemId, i => {
-        const existingEvidence =
-          data.evidence != null
-            ? newEvidenceArray
-            : i.currentScore?.evidences ?? []
-
         return {
           ...i,
           currentScore: {
             processScoreId: data.processScoreId,
             quantity: data.quantity,
             awardedPoints: data.awardedPoints,
-            evidences: existingEvidence
+            evidences: newEvidenceArray
           }
         }
       })
@@ -635,8 +584,68 @@ export default function ProcessoPontuacaoPage() {
     }))
   }
 
+  function computeNodeTotal(node: TreeNode): number {
+    // 1) soma simples dos pontos dos itens do bloco
+    const baseSum = node.items.reduce((acc, item) => {
+      const pts = item.currentScore
+        ? Number(item.currentScore.awardedPoints)
+        : 0
+
+      return acc + (Number.isNaN(pts) ? 0 : pts)
+    }, 0)
+
+    // 2) total "do próprio bloco" (sem considerar filhos ainda)
+    let selfTotal = baseSum
+
+    // se tiver fórmula, aplicamos em cima das variáveis dos itens
+    if (node.hasFormula && node.formulaExpression) {
+    const vars: Record<string, number> = {}
+
+    node.items.forEach(item => {
+      if (!item.formulaKey) return
+
+      const val = item.currentScore
+        ? Number(item.currentScore.quantity)
+        : 0
+
+      vars[item.formulaKey] = Number.isNaN(val) ? 0 : val
+    })
+
+    try {
+      const argNames = Object.keys(vars)
+      const argValues = Object.values(vars)
+
+      if (argNames.length > 0) {
+        const fn = new Function(
+          ...argNames,
+          `return ${node.formulaExpression};`
+        ) as (...args: number[]) => number
+
+        const result = fn(...argValues)
+        const num = Number(result)
+
+        selfTotal = Number.isFinite(num) ? num : baseSum
+      } else {
+        selfTotal = baseSum
+      }
+    } catch (e) {
+      console.error("Erro avaliando fórmula do bloco", node.nodeId, e)
+      selfTotal = baseSum
+    }
+  }
+
+    // 3) soma recursiva dos filhos
+    const childrenSum = node.children.reduce(
+      (acc, child) => acc + computeNodeTotal(child),
+      0
+    )
+
+    // 4) total final = o que pertence a este bloco + tudo que está abaixo dele
+    return selfTotal + childrenSum
+  }
+
   // atualiza só evidência de um item (estrutura + árvore)
-  function applyEvidenceUpdateToState(itemId: number, data: EvidenceUpdateResponse) {
+  function applyEvidenceUpdateToState(itemId: number, data: any) {
     const newEvidence: Evidence = {
       evidenceFileId: data.evidence.evidenceFileId,
       originalName: data.evidence.originalName,
@@ -730,9 +739,7 @@ export default function ProcessoPontuacaoPage() {
         })
       })
 
-      const json = (await r.json().catch(() => null)) as ApiResponse<
-        SaveScoreResponse
-      >
+      const json = (await r.json().catch(() => null)) as ApiResponse<any>
 
       if (!r.ok) {
         openModal({
@@ -884,9 +891,7 @@ export default function ProcessoPontuacaoPage() {
         }
       )
 
-      const json = (await r.json().catch(() => null)) as ApiResponse<
-        EvidenceUpdateResponse
-      >
+      const json = (await r.json().catch(() => null)) as ApiResponse<any>
 
       if (!r.ok) {
         openModal({
@@ -940,9 +945,7 @@ export default function ProcessoPontuacaoPage() {
         }
       )
 
-      const json = (await r.json().catch(() => null)) as ApiResponse<
-        EvidenceUpdateResponse
-      >
+      const json = (await r.json().catch(() => null)) as ApiResponse<any>
 
       if (!r.ok) {
         openModal({
@@ -977,64 +980,6 @@ export default function ProcessoPontuacaoPage() {
     }
   }
 
-  // ✅ envio do processo para avaliação da CPPD
-  async function handleEnviarProcesso() {
-    if (!id) return
-    if (!estrutura) return
-
-    setSending(true)
-
-    try {
-      const r = await fetch(`/api/processos/${id}/enviar`, {
-        method: "POST",
-        credentials: "include"
-      })
-
-      const json = (await r.json().catch(() => null)) as ApiResponse<
-        EnviarProcessoResponse
-      >
-
-      if (!r.ok) {
-        openModal({
-          title: "Não foi possível enviar o processo",
-          message:
-            json?.message ||
-            "Ocorreu um erro ao enviar o processo para avaliação da CPPD.",
-          variant: "error"
-        })
-        return
-      }
-
-      if (json?.data) {
-        setEstrutura(prev =>
-          prev
-            ? {
-                ...prev,
-                status: json.data!.status
-              }
-            : prev
-        )
-      }
-
-      openModal({
-        title: "Processo enviado",
-        message:
-          "O processo foi enviado para avaliação da CPPD com sucesso. A partir de agora não é mais possível editar a pontuação.",
-        variant: "success"
-      })
-    } catch (e: any) {
-      openModal({
-        title: "Erro inesperado",
-        message:
-          e?.message ||
-          "Ocorreu um erro inesperado ao enviar o processo para avaliação.",
-        variant: "error"
-      })
-    } finally {
-      setSending(false)
-    }
-  }
-
   function renderItemRow(item: ScoringItem) {
     const form = itemForm[item.itemId] || {
       quantity: "",
@@ -1054,8 +999,8 @@ export default function ProcessoPontuacaoPage() {
       item.maxPoints !== null && item.maxPoints !== undefined
         ? item.maxPoints
         : item.hasMaxPoints
-        ? item.points
-        : null
+          ? item.points
+          : null
 
     const maxValue =
       maxValueRaw !== null && maxValueRaw !== undefined
@@ -1071,8 +1016,8 @@ export default function ProcessoPontuacaoPage() {
       !isMaxItem && form.awardedPoints
         ? formatPoints(form.awardedPoints)
         : isMaxItem && form.awardedPoints
-        ? formatPoints(form.awardedPoints)
-        : "0,00"
+          ? formatPoints(form.awardedPoints)
+          : "0,00"
 
     const isLockedByAnother =
       activeItemId !== null && activeItemId !== item.itemId
@@ -1320,24 +1265,33 @@ export default function ProcessoPontuacaoPage() {
 
   function renderNode(node: TreeNode) {
     const nodeLabel = node.code ? `${node.code} - ${node.name}` : node.name
+    const nodeTotal = computeNodeTotal(node)
 
     return (
       <div key={node.nodeId} className="space-y-3">
         <div className="bg-[var(--surface-bg)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-sm">
+          {/* Cabeçalho do bloco */}
           <div className="flex justify-between items-center gap-2 mb-3">
             <div>
               <div className="text-sm font-semibold text-[var(--text-primary)]">
                 {nodeLabel}
               </div>
+              {node.hasFormula && node.formulaExpression && (
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                  Bloco com cálculo automático
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Itens do bloco */}
           {node.items.length > 0 && (
             <div className="space-y-2">
               {node.items.map(item => renderItemRow(item))}
             </div>
           )}
 
+          {/* Filhos do bloco */}
           {node.children.length > 0 && (
             <div className="mt-4 border-l-2 border-dashed border-[var(--border-subtle)] pl-4 space-y-4">
               {node.children.map(child => renderNode(child))}
@@ -1349,6 +1303,30 @@ export default function ProcessoPontuacaoPage() {
               Nenhuma atividade cadastrada neste bloco.
             </p>
           )}
+
+          {/* Rodapé – resumo do bloco */}
+          <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] text-[var(--text-muted)]">
+              Resumo deste bloco
+            </div>
+
+            <div className="flex flex-col items-end">
+              <span className="text-[11px] text-[var(--text-secondary)]">
+                Total de pontos do bloco
+              </span>
+              <span className="text-sm font-semibold text-[var(--text-primary)] px-3 py-1 rounded-full bg-[var(--surface-muted-bg)] border border-[var(--border-subtle)]">
+                {formatPoints(nodeTotal)} pontos
+              </span>
+              {node.hasFormula && node.formulaExpression && (
+                <span className="mt-1 text-[10px] text-[var(--text-muted)] text-right whitespace-nowrap">
+                  Valor calculado a partir da fórmula:{" "}
+                  <span className="font-semibold text-[var(--text-primary)]">
+                    {node.formulaExpression}
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -1551,7 +1529,6 @@ export default function ProcessoPontuacaoPage() {
             </Link>
           </div>
         </header>
-
         {loading && (
           <div className="bg-[var(--surface-bg)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-sm">
             <p className="text-sm text-[var(--text-secondary)]">
@@ -1570,12 +1547,6 @@ export default function ProcessoPontuacaoPage() {
           <>
             <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-bg)] p-4 shadow-sm flex flex-wrap gap-3 justify-between items-center">
               <div className="space-y-1 text-sm text-[var(--text-secondary)]">
-                <div>
-                  <span className="font-medium text-[var(--text-primary)]">
-                    Processo:
-                  </span>{" "}
-                  {estrutura.processId}
-                </div>
                 <div>
                   <span className="font-medium text-[var(--text-primary)]">
                     Tipo:
@@ -1609,11 +1580,11 @@ export default function ProcessoPontuacaoPage() {
               )}
             </section>
 
-            {/* ✅ Resumo de pontuação e envio do processo */}
+            {/* Resumo de pontuação (sem botão de enviar) */}
             <section className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-bg)] p-4 shadow-sm flex flex-wrap gap-4 justify-between items-start">
               <div className="space-y-1 text-sm text-[var(--text-secondary)]">
                 <div className="font-semibold text-[var(--text-primary)]">
-                  Resumo de pontuação
+                  Resumo
                 </div>
                 <div>
                   Pontuação total do processo:{" "}
@@ -1644,29 +1615,14 @@ export default function ProcessoPontuacaoPage() {
                   )}
               </div>
 
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={handleEnviarProcesso}
-                  disabled={
-                    !estrutura ||
-                    (estrutura.status !== "DRAFT" &&
-                      estrutura.status !== "RETURNED") ||
-                    !hasMinimumPoints ||
-                    sending
-                  }
-                  className="px-4 py-2 rounded-full text-sm font-medium
-                             bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)]
-                             hover:bg-[var(--btn-primary-hover-bg)]
-                             disabled:opacity-50 disabled:cursor-not-allowed transition"
-                >
-                  {sending ? "Enviando processo..." : "Enviar processo para CPPD"}
-                </button>
-
-                <p className="text-[11px] text-[var(--text-muted)] max-w-xs">
+              <div className="flex flex-col gap-2 max-w-xs text-[11px] text-[var(--text-muted)]">
+                <p>
                   Antes de enviar, revise cuidadosamente as informações
-                  preenchidas e os comprovantes anexados. Após o envio, o
-                  processo seguirá para análise da CPPD.
+                  preenchidas e os comprovantes anexados.
+                </p>
+                <p>
+                  O envio do processo para a CPPD é realizado na tela de{" "}
+                  <span className="font-medium">detalhes do processo</span>.
                 </p>
               </div>
             </section>

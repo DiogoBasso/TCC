@@ -43,7 +43,7 @@ export class ProcessoService {
     private readonly scoreRepo: ProcessScoreRepository = new ProcessScoreRepository()
   ) { }
 
-    // ---- ENVIO DO PROCESSO PARA AVALIAÇÃO DA CPPD ----------------------------
+  // ---- ENVIO DO PROCESSO PARA AVALIAÇÃO DA CPPD ----------------------------
 
   async enviarParaAvaliacao(processId: number, userId: number) {
     const careerProcess = await this.processRepo.findById(processId)
@@ -67,13 +67,13 @@ export class ProcessoService {
     // ✅ Garante regra de interstício e combinação (mesma usada para gerar requerimento)
     this.validarRegrasDeRequerimento(careerProcess)
 
-    // ✅ Soma total de pontos do processo
-    const totalPontos = await this.scoreRepo.sumTotalAwardedPointsByProcess(processId)
+    // ✅ Soma total de pontos do processo (AGORA com fórmula, igual à tela de pontuação)
+    const totalPontos = await this.calcularPontuacaoTotalProcesso(processId)
 
     if (totalPontos < 120) {
       throw new BusinessRuleError(
         `Para enviar o processo é necessário atingir ao menos 120 pontos. ` +
-          `Pontuação atual: ${totalPontos.toFixed(2)}.`,
+        `Pontuação atual: ${totalPontos.toFixed(2)}.`,
         {
           requiredMinimum: 120,
           currentTotal: totalPontos
@@ -86,11 +86,6 @@ export class ProcessoService {
       processId,
       ProcessStatus.SUBMITTED
     )
-
-    // 📝 Futuro:
-    // - gerar PDF da planilha de pontuação
-    // - gerar PDF único com todos os comprovantes na ordem da planilha
-    // - salvar caminhos/URLs desses arquivos no processo
 
     return {
       processId: updated.idProcess,
@@ -117,20 +112,19 @@ export class ProcessoService {
         uf: patch.uf ?? undefined,
         docenteProfile: patch.docenteProfile
           ? {
-            siape: patch.docenteProfile.siape,
-            classLevel: patch.docenteProfile.classLevel,
-            startInterstice: patch.docenteProfile.startInterstice
-              ? new Date(patch.docenteProfile.startInterstice)
-              : undefined,
-            educationLevel: patch.docenteProfile.educationLevel,
-            assignment: patch.docenteProfile.assignment ?? undefined   // 👈 aqui
-          }
+              siape: patch.docenteProfile.siape,
+              classLevel: patch.docenteProfile.classLevel,
+              startInterstice: patch.docenteProfile.startInterstice
+                ? new Date(patch.docenteProfile.startInterstice)
+                : undefined,
+              educationLevel: patch.docenteProfile.educationLevel,
+              assignment: patch.docenteProfile.assignment ?? undefined
+            }
           : undefined
       }
 
       await this.userRepo.updateWithRolesAndDocente(userId, updateInput)
     }
-
 
     const vigente = await this.tableRepo.findVigente(now)
     if (!vigente) {
@@ -176,7 +170,6 @@ export class ProcessoService {
     if (lastApproved) {
       const lastEnd = lastApproved.intersticeEnd
 
-      // se o início do novo interstício for <= fim do último aprovado, bloqueia
       if (intersticeStart <= lastEnd) {
         const formattedLastEnd = dayjs(lastEnd).format("DD/MM/YYYY")
 
@@ -358,15 +351,11 @@ export class ProcessoService {
       destinoCodigo
     )
 
-    // regra de sequência também vale na edição: não pode "puxar" o interstício
-    // para antes do último aprovado
     const lastApproved = await this.processRepo.findLastApprovedProcessForUser(userId)
 
     if (lastApproved) {
       const lastEnd = lastApproved.intersticeEnd
 
-      // se este processo ainda não é o próprio "lastApproved"
-      // (por segurança, embora edição de APPROVED não seja permitida)
       if (lastApproved.idProcess !== processId) {
         if (newIntersticeStart <= lastEnd) {
           const formattedLastEnd = dayjs(lastEnd).format("DD/MM/YYYY")
@@ -516,7 +505,6 @@ export class ProcessoService {
 
     const dataEmissao = dayjs()
 
-    // usa UTC para não “voltar um dia” por causa do fuso horário
     const interIni = dayjs.utc(careerProcess.intersticeStart)
     const interFim = dayjs.utc(careerProcess.intersticeEnd)
 
@@ -776,5 +764,126 @@ export class ProcessoService {
       nivelDestino: careerProcess.nivelDestino
     }
   }
-  
+
+  // ---------- CÁLCULO TOTAL DE PONTOS (COM FÓRMULA) -------------------------
+
+  private async calcularPontuacaoTotalProcesso(processId: number): Promise<number> {
+    const blocks = await this.scoreRepo.findBlocksWithScoresByProcess(processId)
+
+    if (!blocks || blocks.length === 0) {
+      return 0
+    }
+
+    type TreeNode = {
+      nodeId: number
+      parentId: number | null
+      sortOrder: number
+      hasFormula: boolean
+      formulaExpression: string | null
+      items: Array<{
+        itemId: number
+        points: number
+        hasMaxPoints: boolean
+        maxPoints: number | null
+        formulaKey: string | null
+        currentScore: {
+          quantity: number
+          awardedPoints: number
+        } | null
+      }>
+      children: TreeNode[]
+    }
+
+    // monta o mapa de nós
+    const map = new Map<number, TreeNode>()
+    blocks.forEach(b => {
+      map.set(b.nodeId, {
+        nodeId: b.nodeId,
+        parentId: b.parentId ?? null,
+        sortOrder: b.sortOrder,
+        hasFormula: b.hasFormula,
+        formulaExpression: b.formulaExpression ?? null,
+        items: b.items,
+        children: []
+      })
+    })
+
+    // monta a floresta (raízes + filhos)
+    const roots: TreeNode[] = []
+
+    map.forEach(node => {
+      if (node.parentId === null || node.parentId === undefined) {
+        roots.push(node)
+      } else {
+        const parent = map.get(node.parentId)
+        if (parent) {
+          parent.children.push(node)
+        } else {
+          roots.push(node)
+        }
+      }
+    })
+
+    const sortTree = (nodes: TreeNode[]) => {
+      nodes.sort((a, b) => a.sortOrder - b.sortOrder)
+      nodes.forEach(n => sortTree(n.children))
+    }
+
+    sortTree(roots)
+
+    function computeNodeTotal(node: TreeNode): number {
+      // 1) soma dos pontos dos itens do bloco
+      const baseSum = node.items.reduce((acc, item) => {
+        const pts = item.currentScore ? Number(item.currentScore.awardedPoints) : 0
+        return acc + (Number.isNaN(pts) ? 0 : pts)
+      }, 0)
+
+      let selfTotal = baseSum
+
+      // 2) se tiver fórmula, aplica
+      if (node.hasFormula && node.formulaExpression) {
+        const vars: Record<string, number> = {}
+
+        node.items.forEach(item => {
+          if (!item.formulaKey) return
+
+          const val = item.currentScore ? Number(item.currentScore.quantity) : 0
+          vars[item.formulaKey] = Number.isNaN(val) ? 0 : val
+        })
+
+        try {
+          const argNames = Object.keys(vars)
+          const argValues = Object.values(vars)
+
+          if (argNames.length > 0) {
+            const fn = new Function(
+              ...argNames,
+              `return ${node.formulaExpression};`
+            ) as (...args: number[]) => number
+
+            const result = fn(...argValues)
+            const num = Number(result)
+
+            selfTotal = Number.isFinite(num) ? num : baseSum
+          } else {
+            selfTotal = baseSum
+          }
+        } catch (e) {
+          console.error("Erro avaliando fórmula do bloco", node.nodeId, e)
+          selfTotal = baseSum
+        }
+      }
+
+      // 3) soma recursiva dos filhos
+      const childrenSum = node.children.reduce(
+        (acc, child) => acc + computeNodeTotal(child),
+        0
+      )
+
+      // 4) total final
+      return selfTotal + childrenSum
+    }
+
+    return roots.reduce((acc, node) => acc + computeNodeTotal(node), 0)
+  }
 }

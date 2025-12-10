@@ -9,6 +9,7 @@ import { publicRegistrationRoute } from "./route/userRegistrationRoute"
 import { meRoute } from "./route/meRoute"
 import { processoRoute } from "./route/processoRoute"
 import { processScoreRoute } from "./route/processScoreRoute"
+import { processEvaluationRoute } from "./route/processEvaluationRoute"
 
 const app = express()
 
@@ -29,5 +30,6 @@ app.use(userRoute())
 app.use(meRoute())
 app.use(processoRoute())
 app.use(processScoreRoute())
+app.use(processEvaluationRoute())
 
 export default app
