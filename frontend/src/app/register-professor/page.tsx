@@ -2,37 +2,94 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Modal from "@/components/Modal"
+import { translateBackendError } from "@/utils/translateBackendError"
 
-type DocenteProfile = {
-  siape: string
-  class: string
-  level: string
-  startInterstice: string // yyyy-mm-dd (input date)
-  educationLevel: string
-  improvement?: string | null
-  specialization?: string | null
-  mastersDegree?: string | null
-  doctorate?: string | null
-  assignment?: string | null
-  department?: string | null
-  division?: string | null
-  role?: string | null
-  immediateSupervisor?: string | null
+// helpers SEM regex
+function onlyDigits(input: string) {
+  let out = ""
+  for (const ch of input) {
+    if (ch >= "0" && ch <= "9") out += ch
+  }
+  return out
+}
+
+function validateCPFBasic(v: string) {
+  const digits = onlyDigits(v)
+  return digits.length === 11
+}
+
+function validatePhoneBasic(v: string) {
+  const digits = onlyDigits(v)
+  // aceita 10 (fixo) ou 11 (celular)
+  return digits.length >= 10 && digits.length <= 11
+}
+
+// formata telefone BR de forma simples (sem regex)
+function formatPhoneBR(raw: string) {
+  const d = onlyDigits(raw).slice(0, 11)
+  if (d.length <= 10) {
+    // (xx) xxxx-xxxx
+    const p1 = d.slice(0, 2)
+    const p2 = d.slice(2, 6)
+    const p3 = d.slice(6, 10)
+    return [p1 && `(${p1}`, p1 && ")", p2 && ` ${p2}`, p3 && `-${p3}`]
+      .filter(Boolean)
+      .join("")
+  } else {
+    // (xx) xxxxx-xxxx
+    const p1 = d.slice(0, 2)
+    const p2 = d.slice(2, 7)
+    const p3 = d.slice(7, 11)
+    return [p1 && `(${p1}`, p1 && ")", p2 && ` ${p2}`, p3 && `-${p3}`]
+      .filter(Boolean)
+      .join("")
+  }
+}
+
+const CLASS_LEVEL_OPTIONS = [
+  { value: "A1", label: "Classe A - Nível 1" },
+  { value: "B1", label: "Classe B - Nível 1" },
+  { value: "B2", label: "Classe B - Nível 2" },
+  { value: "B3", label: "Classe B - Nível 3" },
+  { value: "B4", label: "Classe B - Nível 4" },
+  { value: "C1", label: "Classe C - Nível 1" },
+  { value: "C2", label: "Classe C - Nível 2" },
+  { value: "C3", label: "Classe C - Nível 3" },
+  { value: "C4", label: "Classe C - Nível 4" },
+  { value: "D1", label: "Classe D - Titular" }
+]
+
+const UF_OPTIONS = [
+  "AC","AL","AP","AM","BA","CE","DF","ES","GO",
+  "MA","MT","MS","MG","PA","PB","PR","PE","PI",
+  "RJ","RN","RS","RO","RR","SC","SP","SE","TO"
+]
+
+type ModalVariant = "success" | "error" | "info"
+
+type ModalState = {
+  open: boolean
+  title: string
+  message: string
+  variant: ModalVariant
 }
 
 export default function RegisterProfessorPage() {
   const router = useRouter()
 
-  // campos principais
+  // principais
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [cpf, setCpf] = useState("")
   const [password, setPassword] = useState("")
+  const [phone, setPhone] = useState("")
+  const [city, setCity] = useState("")
+  const [uf, setUf] = useState("")
 
-  // docente profile (obrigatórios)
+  // docente profile
   const [siape, setSiape] = useState("")
-  const [klass, setKlass] = useState("") // "class" é palavra reservada, uso 'klass' no state
-  const [level, setLevel] = useState("")
+  const [classLevel, setClassLevel] = useState("")
   const [startInterstice, setStartInterstice] = useState("")
   const [educationLevel, setEducationLevel] = useState("")
 
@@ -47,33 +104,82 @@ export default function RegisterProfessorPage() {
   const [role, setRole] = useState<string | "">("")
   const [immediateSupervisor, setImmediateSupervisor] = useState<string | "">("")
 
-  // ui state
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  function validateCPF(v: string) {
-    // validação superficial para evitar ruído no front; backend faz a validação real
-    const digits = v.replace(/\D/g, "")
-    return digits.length === 11
+  // ---- MODAL (mesmo padrão do restante do sistema) -------------------------
+  const [modal, setModal] = useState<ModalState>({
+    open: false,
+    title: "",
+    message: "",
+    variant: "info"
+  })
+
+  // se true, ao fechar modal redireciona para /login
+  const [redirectOnClose, setRedirectOnClose] = useState(false)
+
+  function openModal(payload: Omit<ModalState, "open">) {
+    setModal({
+      open: true,
+      ...payload
+    })
+  }
+
+  function closeModal() {
+    setModal(prev => ({
+      ...prev,
+      open: false
+    }))
+
+    if (redirectOnClose) {
+      router.push("/login")
+    }
+  }
+
+  // -------------------------------------------------------------------------
+
+  function onPhoneChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const formatted = formatPhoneBR(e.target.value)
+    setPhone(formatted)
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(null)
 
-    // validações mínimas de front (o backend faz a validação real)
-    if (!name || !email || !cpf || !password) {
-      setError("Preencha nome, e-mail, CPF e senha")
+    // qualquer envio reseta o redirectOnClose;
+    // só fica true explicitamente no sucesso
+    setRedirectOnClose(false)
+
+    // validações básicas no front
+    if (!name || !email || !cpf || !password || !phone || !city || !uf) {
+      openModal({
+        title: "Dados obrigatórios",
+        message: "Preencha nome, e-mail, CPF, telefone, cidade, UF e senha.",
+        variant: "error"
+      })
       return
     }
-    if (!validateCPF(cpf)) {
-      setError("CPF inválido")
+    if (!validateCPFBasic(cpf)) {
+      openModal({
+        title: "CPF inválido",
+        message: "Informe um CPF com 11 dígitos numéricos.",
+        variant: "error"
+      })
       return
     }
-    if (!siape || !klass || !level || !startInterstice || !educationLevel) {
-      setError("Preencha os campos obrigatórios do perfil docente")
+    if (!validatePhoneBasic(phone)) {
+      openModal({
+        title: "Telefone inválido",
+        message: "Telefone inválido. Use 10 ou 11 dígitos (fixo ou celular).",
+        variant: "error"
+      })
+      return
+    }
+    if (!siape || !classLevel || !startInterstice || !educationLevel) {
+      openModal({
+        title: "Perfil docente incompleto",
+        message: "Preencha os campos obrigatórios do perfil docente.",
+        variant: "error"
+      })
       return
     }
 
@@ -82,11 +188,13 @@ export default function RegisterProfessorPage() {
       email,
       cpf,
       password,
+      phone,
+      city,
+      uf,
       docenteProfile: {
         siape,
-        class: klass,
-        level,
-        startInterstice: new Date(startInterstice), // backend espera Date
+        classLevel, // bate com o backend (enum ClassLevel)
+        startInterstice: new Date(startInterstice),
         educationLevel,
         improvement: improvement || null,
         specialization: specialization || null,
@@ -98,7 +206,6 @@ export default function RegisterProfessorPage() {
         role: role || null,
         immediateSupervisor: immediateSupervisor || null
       }
-      // roles é proibido nesta rota pública
     }
 
     setLoading(true)
@@ -112,26 +219,38 @@ export default function RegisterProfessorPage() {
       const json = await r.json().catch(() => ({}))
 
       if (!r.ok) {
-        // tenta mostrar mensagem do backend se existir
-        const msg =
-          json?.message ||
-          json?.error ||
-          (Array.isArray(json?.data) ? json.data.join(", ") : null) ||
-          "Falha ao cadastrar"
-        setError(msg)
+        const friendlyMessage = translateBackendError(json, "register")
+
+        openModal({
+          title: "Falha no cadastro",
+          message: friendlyMessage,
+          variant: "error"
+        })
+
         setLoading(false)
+        setRedirectOnClose(false)
         return
       }
 
-      setSuccess("Cadastro realizado com sucesso! Redirecionando para login...")
-      setLoading(false)
-      // limpa os campos
+      openModal({
+        title: "Cadastro realizado",
+        message: "Cadastro realizado com sucesso! Você já pode fazer login.",
+        variant: "success"
+      })
+
+      // só no sucesso marcamos pra redirecionar quando o modal for fechado
+      setRedirectOnClose(true)
+
       clearForm()
-      // redireciona para login após 1.2s
-      setTimeout(() => router.push("/login"), 1200)
-    } catch (err: any) {
-      setError("Erro de conexão. Tente novamente.")
       setLoading(false)
+    } catch {
+      openModal({
+        title: "Erro de conexão",
+        message: "Não foi possível conectar com o servidor. Tente novamente em instantes.",
+        variant: "error"
+      })
+      setLoading(false)
+      setRedirectOnClose(false)
     }
   }
 
@@ -140,9 +259,11 @@ export default function RegisterProfessorPage() {
     setEmail("")
     setCpf("")
     setPassword("")
+    setPhone("")
+    setCity("")
+    setUf("")
     setSiape("")
-    setKlass("")
-    setLevel("")
+    setClassLevel("")
     setStartInterstice("")
     setEducationLevel("")
     setImprovement("")
@@ -156,227 +277,344 @@ export default function RegisterProfessorPage() {
     setImmediateSupervisor("")
   }
 
+  const inputClass =
+    "w-full border border-[var(--border-subtle)] rounded-xl px-3 py-2 text-sm " +
+    "bg-[var(--surface-card)] text-[var(--text-primary)] " +
+    "placeholder:text-[var(--text-secondary)] outline-none " +
+    "focus:ring-2 focus:ring-[var(--brand)]"
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <form onSubmit={onSubmit} className="w-full max-w-3xl bg-white rounded-2xl shadow p-6">
-        <h1 className="text-2xl font-semibold mb-4">Cadastro de Professor</h1>
+    <>
+      <Modal
+        open={modal.open}
+        title={modal.title}
+        message={modal.message}
+        variant={modal.variant}
+        onClose={closeModal}
+      />
 
-        {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
-        {success && <p className="text-green-700 text-sm mb-3">{success}</p>}
+      <div className="min-h-screen bg-[var(--surface-muted)] flex items-center justify-center p-4">
+        <form
+          onSubmit={onSubmit}
+          className="
+            w-full max-w-3xl
+            bg-[var(--surface-card)]
+            rounded-2xl shadow-sm
+            border border-[var(--border-subtle)]
+            p-6 space-y-4
+          "
+        >
+          <h1 className="text-2xl font-semibold mb-2 text-[var(--text-primary)]">
+            Cadastro de Docente
+          </h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Dados pessoais */}
-          <div className="md:col-span-2">
-            <h2 className="text-lg font-medium mb-2">Dados pessoais</h2>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Dados pessoais */}
+            <div className="md:col-span-2">
+              <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
+                Dados pessoais
+              </h2>
+            </div>
 
-          <div>
-            <label className="block text-sm mb-1">Nome completo *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="Seu nome"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">E-mail *</label>
-            <input
-              type="email"
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="seu@email.com"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">CPF *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={cpf}
-              onChange={e => setCpf(e.target.value)}
-              placeholder="000.000.000-00"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Senha *</label>
-            <input
-              type="password"
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="mínimo 8 caracteres"
-            />
-          </div>
-
-          {/* Perfil Docente */}
-          <div className="md:col-span-2 mt-4">
-            <h2 className="text-lg font-medium mb-2">Perfil do Docente</h2>
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">SIAPE *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={siape}
-              onChange={e => setSiape(e.target.value)}
-              placeholder="SIAPE"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Classe *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={klass}
-              onChange={e => setKlass(e.target.value)}
-              placeholder="Classe"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Nível *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={level}
-              onChange={e => setLevel(e.target.value)}
-              placeholder="Nível"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Início do Interstício *</label>
-            <input
-              type="date"
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={startInterstice}
-              onChange={e => setStartInterstice(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Escolaridade *</label>
-            <input
-              className="w-full border rounded-xl p-2 outline-none focus:ring"
-              value={educationLevel}
-              onChange={e => setEducationLevel(e.target.value)}
-              placeholder="Graduação, Mestrado, Doutorado..."
-            />
-          </div>
-
-          {/* opcionais */}
-          <div className="md:col-span-2 mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm mb-1">Aperfeiçoamento</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Nome completo *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={improvement}
-                onChange={e => setImprovement(e.target.value)}
+                className={inputClass}
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Seu nome"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Especialização</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                E-mail *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={specialization}
-                onChange={e => setSpecialization(e.target.value)}
+                type="email"
+                className={inputClass}
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="seu@email.com"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Mestrado</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                CPF *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={mastersDegree}
-                onChange={e => setMastersDegree(e.target.value)}
+                className={inputClass}
+                value={cpf}
+                onChange={e => setCpf(e.target.value)}
+                placeholder="000.000.000-00"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Doutorado</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Senha *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={doctorate}
-                onChange={e => setDoctorate(e.target.value)}
+                type="password"
+                className={inputClass}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="mínimo 8 caracteres"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Lotação / Atuação</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Telefone *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={assignment}
-                onChange={e => setAssignment(e.target.value)}
-                placeholder="Ex.: Campus X"
+                className={inputClass}
+                value={phone}
+                onChange={onPhoneChange}
+                placeholder="(11) 91234-5678"
+                inputMode="tel"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Departamento</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Cidade *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={department}
-                onChange={e => setDepartment(e.target.value)}
+                className={inputClass}
+                value={city}
+                onChange={e => setCity(e.target.value)}
+                placeholder="Ex.: Santa Maria"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Divisão</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                UF *
+              </label>
+              <select
+                className={inputClass}
+                value={uf}
+                onChange={e => setUf(e.target.value)}
+              >
+                <option value="">Selecione...</option>
+                {UF_OPTIONS.map(sigla => (
+                  <option key={sigla} value={sigla}>
+                    {sigla}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Perfil Docente */}
+            <div className="md:col-span-2 mt-4">
+              <h2 className="text-lg font-medium mb-2 text-[var(--text-primary)]">
+                Perfil do Docente
+              </h2>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                SIAPE *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={division}
-                onChange={e => setDivision(e.target.value)}
+                className={inputClass}
+                value={siape}
+                onChange={e => setSiape(e.target.value)}
+                placeholder="SIAPE"
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Função</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Classe / Nível *
+              </label>
+              <select
+                className={inputClass}
+                value={classLevel}
+                onChange={e => setClassLevel(e.target.value)}
+              >
+                <option value="">Selecione...</option>
+                {CLASS_LEVEL_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Início do Interstício *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={role}
-                onChange={e => setRole(e.target.value)}
+                type="date"
+                className={inputClass}
+                value={startInterstice}
+                onChange={e => setStartInterstice(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-sm mb-1">Chefia imediata</label>
+              <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                Escolaridade *
+              </label>
               <input
-                className="w-full border rounded-xl p-2 outline-none focus:ring"
-                value={immediateSupervisor}
-                onChange={e => setImmediateSupervisor(e.target.value)}
+                className={inputClass}
+                value={educationLevel}
+                onChange={e => setEducationLevel(e.target.value)}
+                placeholder="Graduação, Mestrado, Doutorado..."
               />
+            </div>
+
+            {/* opcionais */}
+            <div className="md:col-span-2 mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Aperfeiçoamento
+                </label>
+                <input
+                  className={inputClass}
+                  value={improvement}
+                  onChange={e => setImprovement(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Especialização
+                </label>
+                <input
+                  className={inputClass}
+                  value={specialization}
+                  onChange={e => setSpecialization(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Mestrado
+                </label>
+                <input
+                  className={inputClass}
+                  value={mastersDegree}
+                  onChange={e => setMastersDegree(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Doutorado
+                </label>
+                <input
+                  className={inputClass}
+                  value={doctorate}
+                  onChange={e => setDoctorate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Lotação / Atuação
+                </label>
+                <input
+                  className={inputClass}
+                  value={assignment}
+                  onChange={e => setAssignment(e.target.value)}
+                  placeholder="Ex.: Campus X"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Departamento
+                </label>
+                <input
+                  className={inputClass}
+                  value={department}
+                  onChange={e => setDepartment(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Divisão
+                </label>
+                <input
+                  className={inputClass}
+                  value={division}
+                  onChange={e => setDivision(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Função
+                </label>
+                <input
+                  className={inputClass}
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm mb-1 text-[var(--text-secondary)]">
+                  Chefia imediata
+                </label>
+                <input
+                  className={inputClass}
+                  value={immediateSupervisor}
+                  onChange={e => setImmediateSupervisor(e.target.value)}
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3 mt-6">
-          <button
-            type="submit"
-            disabled={loading}
-            className="px-4 py-2 rounded-xl bg-black text-white disabled:opacity-50"
-          >
-            {loading ? "Enviando..." : "Cadastrar"}
-          </button>
+          <div className="flex items-center gap-3 mt-6">
+            <button
+              type="submit"
+              disabled={loading}
+              className="
+                px-4 py-2 rounded-xl text-sm font-medium
+                bg-[var(--btn-primary-bg)]
+                text-[var(--btn-primary-text)]
+                hover:bg-[var(--btn-primary-hover-bg)]
+                disabled:opacity-50
+              "
+            >
+              {loading ? "Enviando..." : "Cadastrar"}
+            </button>
 
-          <button
-            type="button"
-            onClick={clearForm}
-            className="px-4 py-2 rounded-xl border"
-          >
-            Limpar
-          </button>
+            <button
+              type="button"
+              onClick={clearForm}
+              className="
+                px-4 py-2 rounded-xl text-sm
+                border border-[var(--border-subtle)]
+                text-[var(--text-secondary)]
+                hover:bg-[var(--surface-muted)]
+              "
+            >
+              Limpar
+            </button>
 
-          <a href="/login" className="ml-auto text-sm text-blue-600 hover:underline">
-            Já tenho conta
-          </a>
-        </div>
+            <a
+              href="/login"
+              className="ml-auto text-sm text-[var(--brand)] hover:underline"
+            >
+              Já tenho conta
+            </a>
+          </div>
 
-        <p className="text-xs text-gray-500 mt-3">Campos com * são obrigatórios</p>
-      </form>
-    </div>
+          <p className="text-xs text-[var(--text-secondary)] mt-3">
+            Campos com * são obrigatórios
+          </p>
+        </form>
+      </div>
+    </>
   )
 }

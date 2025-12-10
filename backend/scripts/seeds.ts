@@ -1,9 +1,10 @@
-import { PrismaClient, RoleName } from "@prisma/client"
+import { PrismaClient, RoleName, ClassLevel } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
 const prisma = new PrismaClient()
 
 async function main() {
+  // 🔹 1) Roles base do sistema
   await prisma.role.createMany({
     data: [
       { name: RoleName.ADMIN },
@@ -13,6 +14,7 @@ async function main() {
     skipDuplicates: true
   })
 
+  // 🔹 2) Usuário ADMIN
   const adminPasswordHash = await bcrypt.hash(
     process.env.SEED_ADMIN_PASSWORD ?? "Admin@123456",
     10
@@ -28,11 +30,16 @@ async function main() {
       passwordHash: adminPasswordHash,
       active: true,
       roles: {
-        create: [{ role: { connect: { name: RoleName.ADMIN } } }]
+        create: [
+          {
+            role: { connect: { name: RoleName.ADMIN } }
+          }
+        ]
       }
     }
   })
 
+  // 🔹 3) Usuária Marina (DOCENTE + CPPD_MEMBER)
   const marinaPasswordHash = await bcrypt.hash("senhaSegura123", 10)
 
   await prisma.user.upsert({
@@ -53,8 +60,7 @@ async function main() {
       docente: {
         create: {
           siape: "1234567",
-          class: "D",
-          level: "III",
+          classLevel: ClassLevel.D1,
           start_interstice: new Date("2023-03-01T00:00:00.000Z"),
           educationLevel: "Mestrado",
           improvement: "Aperfeiçoamento em Metodologias de Ensino",
@@ -70,6 +76,45 @@ async function main() {
       }
     }
   })
+
+  // 🔹 4) Docente de teste (o CPF/senha que você usou no Postman)
+  const docenteTestePasswordHash = await bcrypt.hash("Senha12345678", 10)
+
+  await prisma.user.upsert({
+    where: { cpf: "03676144058" },
+    update: {},
+    create: {
+      name: "Docente Teste",
+      email: "docente.teste@if.edu.br",
+      cpf: "03676144058",
+      passwordHash: docenteTestePasswordHash,
+      active: true,
+      roles: {
+        create: [
+          { role: { connect: { name: RoleName.DOCENTE } } }
+        ]
+      },
+      docente: {
+        create: {
+          siape: "7654321",
+          classLevel: ClassLevel.D1,
+          start_interstice: new Date("2024-01-01T00:00:00.000Z"),
+          educationLevel: "Graduação",
+          improvement: null,
+          specialization: null,
+          mastersDegree: null,
+          doctorate: null,
+          assignment: "Docente",
+          department: "Ensino",
+          division: "Campus X",
+          role: "Professor EBTT",
+          immediate_supervisor: "Chefia Imediata"
+        }
+      }
+    }
+  })
+
+  // 🔹 5) Tabela de pontuação + nós + itens (ScoringTable / ScoringNode / ScoringItem)
 
   const table = await upsertScoringTable("Tabela EBTT 2025", new Date("2025-01-01"))
 
@@ -118,8 +163,12 @@ async function upsertScoringTable(name: string, startsOn?: Date) {
     where: { name, deletedDate: null }
   })
   if (existing) return existing
+
   return prisma.scoringTable.create({
-    data: { name, startsOn: startsOn ?? null }
+    data: {
+      name,
+      startsOn: startsOn ?? null
+    }
   })
 }
 
@@ -131,9 +180,15 @@ async function createNode(
   code?: string | null
 ) {
   const existing = await prisma.scoringNode.findFirst({
-    where: { scoringTableId, parentId: parentId ?? undefined, name }
+    where: {
+      scoringTableId,
+      parentId: parentId ?? undefined,
+      name,
+      deletedDate: null
+    }
   })
   if (existing) return existing
+
   return prisma.scoringNode.create({
     data: {
       scoringTableId,
@@ -155,9 +210,15 @@ async function createItem(
   hasMaxPoints?: boolean
 ) {
   const existing = await prisma.scoringItem.findFirst({
-    where: { scoringTableId, nodeId, description, deletedDate: null }
+    where: {
+      scoringTableId,
+      nodeId,
+      description,
+      deletedDate: null
+    }
   })
   if (existing) return existing
+
   return prisma.scoringItem.create({
     data: {
       scoringTableId,
@@ -172,7 +233,7 @@ async function createItem(
 }
 
 main()
-  .catch((e) => {
+  .catch(e => {
     console.error("Seed failed:", e)
     process.exit(1)
   })

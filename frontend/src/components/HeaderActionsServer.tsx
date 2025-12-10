@@ -15,14 +15,28 @@ function decodeJwtPayloadServer(token: string): any | null {
 }
 
 export default async function HeaderActionsServer() {
+  // cookies() agora exige await (Next 15+)
   const jar = await cookies()
+
   const access = jar.get("accessToken")?.value
-  if (!access) return null
+  if (!access) {
+    return (
+      <div className="text-[var(--text-secondary)] text-xs">
+        Carregando...
+      </div>
+    )
+  }
 
   const payload = decodeJwtPayloadServer(access)
+
   const roles: Role[] = Array.isArray(payload?.roles) ? payload.roles : []
   const selectedRole: Role | null = payload?.selectedRole ?? null
 
-  // Renderiza o client com snapshot estável — isso evita diferenças de estrutura na hidratação
-  return <HeaderActionsClient roles={roles} selectedRole={selectedRole} />
+  // Snapshot estável — evita warnings de hidratação
+  return (
+    <HeaderActionsClient
+      roles={roles}
+      selectedRole={selectedRole}
+    />
+  )
 }

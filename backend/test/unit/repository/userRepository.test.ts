@@ -13,6 +13,7 @@ describe("UserRepository", () => {
     email: "fulano@if.edu.br",
     cpf: "11122233344",
     passwordHash: "hashed",
+    phone: "(11) 99888-7766", // 👈 phone no mock
     active: true,
     createdAt: now,
     deletedDate: null,
@@ -105,6 +106,7 @@ describe("UserRepository", () => {
         email: dbUser.email,
         cpf: dbUser.cpf,
         passwordHash: dbUser.passwordHash,
+        phone: dbUser.phone, // 👈 incluir phone no input
         roles: [RoleName.ADMIN, RoleName.DOCENTE],
         docenteProfile: {
           siape: "1234567",
@@ -124,7 +126,7 @@ describe("UserRepository", () => {
         }
       }
 
-      const created = await repository.createWithRolesAndDocente(input)
+      const created = await repository.createWithRolesAndDocente(input as any)
 
       expect(created).toEqual(dbUser)
       expect(prisma.user.create).toHaveBeenCalledWith({
@@ -133,6 +135,7 @@ describe("UserRepository", () => {
           email: input.email,
           cpf: input.cpf,
           passwordHash: input.passwordHash,
+          phone: input.phone, // 👈 esperado na query
           roles: {
             create: input.roles.map(r => ({ role: { connect: { name: r } } }))
           },
@@ -170,6 +173,7 @@ describe("UserRepository", () => {
         email: dbUser.email,
         cpf: dbUser.cpf,
         passwordHash: dbUser.passwordHash,
+        phone: dbUser.phone, // 👈 incluir phone mesmo sem docenteProfile
         roles: [RoleName.ADMIN]
       }
 
@@ -181,6 +185,7 @@ describe("UserRepository", () => {
           email: input.email,
           cpf: input.cpf,
           passwordHash: input.passwordHash,
+          phone: input.phone, // 👈 esperado
           roles: {
             create: input.roles.map(r => ({ role: { connect: { name: r } } }))
           },
@@ -195,7 +200,7 @@ describe("UserRepository", () => {
   })
 
   describe("updateWithRolesAndDocente", () => {
-    test("atualiza campos simples e reseta roles com create, e upsert de docente", async () => {
+    test("atualiza campos simples, reseta roles e faz upsert de docente", async () => {
       jest.spyOn(prisma.user, "update").mockResolvedValue(dbUser as any)
 
       const input = {
@@ -203,6 +208,7 @@ describe("UserRepository", () => {
         email: "novo@if.edu.br",
         cpf: "99988877766",
         active: false,
+        phone: "(11) 97777-5555", // 👈 atualizar phone
         roles: [RoleName.DOCENTE],
         docenteProfile: {
           siape: "7654321",
@@ -232,6 +238,7 @@ describe("UserRepository", () => {
           email: input.email,
           cpf: input.cpf,
           active: input.active,
+          phone: input.phone, // 👈 esperado
           roles: {
             deleteMany: {},
             create: input.roles.map(r => ({ role: { connect: { name: r } } }))

@@ -58,7 +58,6 @@ export default function RoleDropdown({
     if (disabled) return
     setOpen(o => !o)
     if (!open) {
-      // ao abrir, posiciona ativo no item atual
       const idx = Math.max(0, options.findIndex(o => o.value === value))
       setActiveIndex(idx)
     }
@@ -86,10 +85,10 @@ export default function RoleDropdown({
   function onListKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === "ArrowDown") {
       e.preventDefault()
-      setActiveIndex(i => Math.min(options.length - 1, (i < 0 ? 0 : i + 1)))
+      setActiveIndex(i => Math.min(options.length - 1, i < 0 ? 0 : i + 1))
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
-      setActiveIndex(i => Math.max(0, (i < 0 ? 0 : i - 1)))
+      setActiveIndex(i => Math.max(0, i < 0 ? 0 : i - 1))
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault()
       if (activeIndex >= 0) selectAt(activeIndex)
@@ -111,7 +110,14 @@ export default function RoleDropdown({
         onKeyDown={onKeyDown}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="inline-flex items-center justify-between gap-2 pr-8 pl-3 py-2 rounded-xl border bg-white text-sm disabled:opacity-60 min-w-[160px] shadow-sm"
+        className="
+          inline-flex items-center justify-between gap-2
+          pr-8 pl-3 py-2 min-w-[170px]
+          rounded-xl border border-[var(--gray-700)]
+          bg-[var(--surface-contrast-bg)]
+          text-sm text-[var(--navbar-text)]
+          shadow-sm disabled:opacity-60
+        "
         title="Trocar módulo"
       >
         <span>{current ? current.label : placeholder}</span>
@@ -122,7 +128,7 @@ export default function RoleDropdown({
           viewBox="0 0 20 20"
           aria-hidden="true"
         >
-          <path d="M5 7l5 6 5-6H5z" />
+          <path d="M5 7l5 6 5-6H5z" fill="currentColor" />
         </svg>
       </button>
 
@@ -132,7 +138,12 @@ export default function RoleDropdown({
           role="listbox"
           tabIndex={-1}
           onKeyDown={onListKeyDown}
-          className="absolute z-50 mt-2 w-full rounded-2xl border bg-white shadow-lg overflow-hidden"
+          className="
+            absolute mt-2 w-full
+            rounded-xl border border-[var(--gray-700)]
+            bg-[var(--surface-contrast-bg)]
+            shadow-lg overflow-hidden z-[60]
+          "
         >
           <ul className="py-1 max-h-64 overflow-auto">
             {options.map((opt, idx) => {
@@ -148,9 +159,12 @@ export default function RoleDropdown({
                     onClick={() => selectAt(idx)}
                     className={[
                       "w-full text-left px-3 py-2 text-sm",
-                      active ? "bg-gray-100" : "",
+                      "text-[var(--navbar-text)]",
+                      active ? "bg-[var(--gray-800)]" : "",
                       selected ? "font-medium" : "font-normal"
-                    ].join(" ").trim()}
+                    ]
+                      .join(" ")
+                      .trim()}
                   >
                     {opt.label}
                   </button>

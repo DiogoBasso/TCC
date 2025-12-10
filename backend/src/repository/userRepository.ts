@@ -1,16 +1,18 @@
-import { RoleName } from "@prisma/client"
+import { RoleName, ClassLevel } from "@prisma/client"
 import { prisma } from "../infra/prismaClient"
 
 export interface CreateWithRolesAndDocenteInput {
   name: string
   email: string
   cpf: string
+  phone: string | null
+  city: string | null
+  uf: string | null
   passwordHash: string
   roles: RoleName[]
   docenteProfile?: {
     siape: string
-    class: string
-    level: string
+    classLevel: ClassLevel
     startInterstice: Date
     educationLevel: string
     improvement?: string | null
@@ -25,20 +27,9 @@ export interface CreateWithRolesAndDocenteInput {
   }
 }
 
-export interface UpdateUserWithRolesAndDocenteInput {
-  name?: string
-  email?: string
-  cpf?: string
-  active?: boolean
-  roles?: RoleName[]
-  docenteProfile?: UpdateDocenteProfileInput
-}
-
-
 export interface UpdateDocenteProfileInput {
   siape?: string
-  class?: string
-  level?: string
+  classLevel?: ClassLevel
   startInterstice?: Date
   educationLevel?: string
   improvement?: string | null
@@ -52,10 +43,22 @@ export interface UpdateDocenteProfileInput {
   immediateSupervisor?: string | null
 }
 
+export interface UpdateUserWithRolesAndDocenteInput {
+  name?: string
+  email?: string
+  cpf?: string
+  phone?: string | null
+  city?: string | null
+  uf?: string | null
+  active?: boolean
+  roles?: RoleName[]
+  docenteProfile?: UpdateDocenteProfileInput
+}
+
 export class UserRepository {
   async findByCpf(cpf: string) {
     return prisma.user.findUnique({
-      where: { cpf },
+      where: { cpf }, // ✅ aqui já chega normalizado do service
       include: {
         roles: { include: { role: true } },
         docente: true
@@ -69,7 +72,7 @@ export class UserRepository {
     }
 
     return prisma.user.findFirst({
-      where: { idUser, deletedDate: null }, // ok em findFirst
+      where: { idUser, deletedDate: null },
       include: {
         roles: { include: { role: true } },
         docente: true
@@ -94,6 +97,9 @@ export class UserRepository {
         name: input.name,
         email: input.email,
         cpf: input.cpf,
+        phone: input.phone,
+        city: input.city,
+        uf: input.uf,
         passwordHash: input.passwordHash,
         roles: {
           create: input.roles.map(name => ({
@@ -104,8 +110,7 @@ export class UserRepository {
           ? {
               create: {
                 siape: input.docenteProfile.siape,
-                class: input.docenteProfile.class,
-                level: input.docenteProfile.level,
+                classLevel: input.docenteProfile.classLevel,
                 start_interstice: input.docenteProfile.startInterstice,
                 educationLevel: input.docenteProfile.educationLevel,
                 improvement: input.docenteProfile.improvement ?? null,
@@ -135,13 +140,16 @@ export class UserRepository {
 
     if (input.name !== undefined) data.name = input.name
     if (input.email !== undefined) data.email = input.email
+    if (input.phone !== undefined) data.phone = input.phone
+    if (input.city !== undefined) data.city = input.city
+    if (input.uf !== undefined) data.uf = input.uf
     if (input.cpf !== undefined) data.cpf = input.cpf
     if (input.active !== undefined) data.active = input.active
 
     if (input.roles) {
       data.roles = {
         deleteMany: {},
-        create: input.roles.map((name) => ({
+        create: input.roles.map(name => ({
           role: { connect: { name } }
         }))
       }
@@ -151,8 +159,7 @@ export class UserRepository {
       const p = input.docenteProfile
       const docenteUpdate: any = {}
       if (p.siape !== undefined) docenteUpdate.siape = p.siape
-      if (p.class !== undefined) docenteUpdate.class = p.class
-      if (p.level !== undefined) docenteUpdate.level = p.level
+      if (p.classLevel !== undefined) docenteUpdate.classLevel = p.classLevel
       if (p.startInterstice !== undefined) docenteUpdate.start_interstice = p.startInterstice
       if (p.educationLevel !== undefined) docenteUpdate.educationLevel = p.educationLevel
       if (p.improvement !== undefined) docenteUpdate.improvement = p.improvement
@@ -170,8 +177,7 @@ export class UserRepository {
           update: docenteUpdate,
           create: {
             siape: p.siape!,
-            class: p.class!,
-            level: p.level!,
+            classLevel: p.classLevel!,
             start_interstice: p.startInterstice!,
             educationLevel: p.educationLevel!,
             improvement: p.improvement ?? null,
@@ -208,5 +214,4 @@ export class UserRepository {
       }
     })
   }
-  
 }

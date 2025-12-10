@@ -1,11 +1,27 @@
-import { RoleName } from "@prisma/client"
+import { RoleName, ClassLevel } from "@prisma/client"
 import Joi from "joi"
 import { cpf as cpfValidator } from "cpf-cnpj-validator"
 
+function onlyDigits(input: string): string {
+  let out = ""
+  for (const ch of input) {
+    if (ch >= "0" && ch <= "9") out += ch
+  }
+  return out
+}
+
+function validatePhone(v: string, helpers: Joi.CustomHelpers<string>) {
+  if (typeof v !== "string") return helpers.error("any.invalid")
+  const digits = onlyDigits(v)
+  if (digits.length < 10 || digits.length > 11) return helpers.error("any.invalid")
+  return v
+}
+
 const docenteProfileSchema = Joi.object({
   siape: Joi.string().trim().required(),
-  class: Joi.string().trim().required(),
-  level: Joi.string().trim().required(),
+  classLevel: Joi.string()
+    .valid(...Object.values(ClassLevel))
+    .required(),
   startInterstice: Joi.date().required(),
   educationLevel: Joi.string().trim().required(),
   improvement: Joi.string().trim().optional().allow(null),
@@ -25,11 +41,19 @@ export const createUserSchema = Joi.object({
   cpf: Joi.string()
     .trim()
     .custom((value, helpers) => {
-      if (!cpfValidator.isValid(value)) return helpers.error("any.invalid")
-      return value
+      const digits = onlyDigits(value)
+      if (!cpfValidator.isValid(digits)) return helpers.error("any.invalid")
+      return digits        // ✅ já normaliza para só dígitos
     })
     .messages({ "any.invalid": "CPF inválido" })
     .required(),
+  phone: Joi.string()
+    .trim()
+    .custom(validatePhone)
+    .messages({ "any.invalid": "Telefone inválido (use 10 ou 11 dígitos)" })
+    .required(),
+  city: Joi.string().max(100).allow(null, "").optional(),            // ✅ novo
+  uf: Joi.string().length(2).uppercase().allow(null, "").optional(), // ✅ novo
   password: Joi.string().min(8).required(),
   roles: Joi.array()
     .items(Joi.string().valid(RoleName.ADMIN, RoleName.CPPD_MEMBER, RoleName.DOCENTE))
@@ -46,8 +70,9 @@ export const loginSchema = Joi.object({
   cpf: Joi.string()
     .trim()
     .custom((value, helpers) => {
-      if (!cpfValidator.isValid(value)) return helpers.error("any.invalid")
-      return value
+      const digits = onlyDigits(value)
+      if (!cpfValidator.isValid(digits)) return helpers.error("any.invalid")
+      return digits          // ✅ login também já usa só dígitos
     })
     .messages({ "any.invalid": "CPF inválido" })
     .required(),
@@ -72,8 +97,9 @@ export const logoutSchema = Joi.object({
 
 const updateDocenteSchema = Joi.object({
   siape: Joi.string().trim().optional(),
-  class: Joi.string().trim().optional(),
-  level: Joi.string().trim().optional(),
+  classLevel: Joi.string()
+    .valid(...Object.values(ClassLevel))
+    .optional(),
   startInterstice: Joi.date().optional(),
   educationLevel: Joi.string().trim().optional(),
   improvement: Joi.string().trim().allow(null).optional(),
@@ -94,10 +120,18 @@ export const updateUserSchema = Joi.object({
     .trim()
     .custom((value, helpers) => {
       if (value === undefined) return value
-      return !cpfValidator.isValid(value) ? helpers.error("any.invalid") : value
+      const digits = onlyDigits(value)
+      return !cpfValidator.isValid(digits) ? helpers.error("any.invalid") : digits // ✅ normaliza se vier
     })
     .messages({ "any.invalid": "CPF inválido" })
     .optional(),
+  phone: Joi.string()
+    .trim()
+    .custom((v, h) => (v === undefined ? v : validatePhone(v, h)))
+    .messages({ "any.invalid": "Telefone inválido (use 10 ou 11 dígitos)" })
+    .optional(),
+  city: Joi.string().max(100).allow(null, "").optional(),          // ✅ novo
+  uf: Joi.string().length(2).uppercase().allow(null, "").optional(), // ✅ agora optional
   active: Joi.boolean().optional(),
   roles: Joi.array()
     .items(Joi.string().valid(RoleName.ADMIN, RoleName.CPPD_MEMBER, RoleName.DOCENTE))
@@ -118,10 +152,20 @@ export const publicDocenteRegisterSchema = Joi.object({
   email: Joi.string().email().required(),
   cpf: Joi.string()
     .trim()
-    .custom((v, h) => (!cpfValidator.isValid(v) ? h.error("any.invalid") : v))
+    .custom((v, h) => {
+      const digits = onlyDigits(v)
+      return !cpfValidator.isValid(digits) ? h.error("any.invalid") : digits   // ✅ normaliza
+    })
     .messages({ "any.invalid": "CPF inválido" })
     .required(),
+  phone: Joi.string()
+    .trim()
+    .custom(validatePhone)
+    .messages({ "any.invalid": "Telefone inválido (use 10 ou 11 dígitos)" })
+    .required(),
+  city: Joi.string().max(100).allow(null, ""),
+  uf: Joi.string().length(2).uppercase().allow(null, ""),
   password: Joi.string().min(8).required(),
   docenteProfile: docenteProfileSchema.required(),
-  roles: Joi.forbidden() 
+  roles: Joi.forbidden()
 })

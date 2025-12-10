@@ -3,7 +3,7 @@
 import { useState } from "react"
 
 export function LogoutButton() {
-  const [loading, setLoading] = useState(false) // false tanto no server quanto no client
+  const [loading, setLoading] = useState(false)
 
   async function onClick() {
     try {
@@ -25,7 +25,14 @@ export function LogoutButton() {
       type="button"
       onClick={onClick}
       disabled={loading}
-      className="px-3 py-2 bg-black text-white rounded-xl hover:opacity-80 disabled:opacity-60"
+      className="
+        px-3 py-1.5 rounded-full text-xs font-medium
+        border border-[var(--border-subtle)]
+        text-[var(--state-danger-text)]
+        hover:bg-[var(--surface-hover)]
+        disabled:opacity-60
+        transition
+      "
       title="Sair"
     >
       {loading ? "Saindo..." : "Sair"}
