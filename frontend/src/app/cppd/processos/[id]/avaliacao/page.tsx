@@ -1,3 +1,4 @@
+// src/app/cppd/processos/[id]/avaliacao/page.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
@@ -36,6 +37,7 @@ interface EvaluationNodeDto {
   code: string | null
   sortOrder: number
   hasFormula: boolean
+  formulaExpression: string | null
 }
 
 interface EvaluationItemDto {
@@ -46,6 +48,7 @@ interface EvaluationItemDto {
   unit: string | null
   hasMaxPoints: boolean
   maxPoints: number | null
+  formulaKey: string | null
 }
 
 interface EvaluationScoreDto {
@@ -114,6 +117,13 @@ function formatPointsToInput(value: number | null | undefined) {
   return String(value).replace(".", ",")
 }
 
+function parsePtbrNumber(raw: string) {
+  const cleaned = (raw ?? "").trim()
+  if (cleaned === "") return null
+  const n = Number(cleaned.replace(/\./g, "").replace(",", "."))
+  return Number.isFinite(n) ? n : null
+}
+
 function docentePreencheu(score: EvaluationScoreDto | null | undefined) {
   if (!score) return false
   const qty = score.quantity ?? 0
@@ -129,6 +139,11 @@ function itemAvaliado(score: EvaluationScoreDto | null | undefined) {
   )
 }
 
+function safeNumber(value: any) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
 // ---------- Árvore de blocos ----------
 
 type TreeNode = {
@@ -138,6 +153,7 @@ type TreeNode = {
   parentId: number | null
   sortOrder: number
   hasFormula: boolean
+  formulaExpression: string | null
   items: EvaluationItemDto[]
   children: TreeNode[]
 }
@@ -156,6 +172,7 @@ function buildTree(
       parentId: n.parentId,
       sortOrder: n.sortOrder,
       hasFormula: n.hasFormula,
+      formulaExpression: n.formulaExpression ?? null,
       items: [],
       children: []
     })
@@ -206,6 +223,16 @@ type ItemState = {
 
 type ItemStateMap = Record<number, ItemState>
 
+type NodeTotalsDocente = {
+  total: number
+  formulaValue: number | null
+}
+
+type NodeTotalsCppd = {
+  total: number | null
+  formulaValue: number | null
+}
+
 export default function CppdAvaliacaoPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -223,6 +250,44 @@ export default function CppdAvaliacaoPage() {
 
   const decision: CppdDecision = "APPROVED"
 
+  // ✅ Redireciona para login quando não autenticado
+  function redirectToLogin() {
+    const nextPath =
+      typeof window !== "undefined"
+        ? window.location.pathname + window.location.search
+        : "/cppd"
+    router.push(`/login?next=${encodeURIComponent(nextPath)}`)
+  }
+
+  // ✅ Fetch padrão que trata 401/403 e joga para o login
+  async function fetchApi<T>(url: string, init?: RequestInit) {
+    const res = await fetch(url, {
+      credentials: "include",
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {})
+      }
+    })
+
+    if (res.status === 401 || res.status === 403) {
+      redirectToLogin()
+      return {
+        ok: false,
+        status: res.status,
+        payload: null as ApiResponse<T> | null
+      }
+    }
+
+    const payload = (await res.json().catch(() => null)) as ApiResponse<T> | null
+
+    return {
+      ok: res.ok,
+      status: res.status,
+      payload
+    }
+  }
+
   useEffect(() => {
     if (!Number.isFinite(processId)) return
 
@@ -232,13 +297,21 @@ export default function CppdAvaliacaoPage() {
       setInfoMessage(null)
 
       try {
-        const res = await fetch(`/api/cppd/processos/${processId}/avaliacao`, {
-          method: "GET"
-        })
+        const { ok, payload } = await fetchApi<ProcessEvaluationViewDto>(
+          `/api/cppd/processos/${processId}/avaliacao`,
+          { method: "GET" }
+        )
 
-        const payload: ApiResponse<ProcessEvaluationViewDto> = await res.json()
+        // se foi 401/403 já redirecionou
+        if (!payload) {
+          if (!ok) {
+            setError("Falha ao carregar processo para avaliação.")
+            setView(null)
+          }
+          return
+        }
 
-        if (!res.ok || payload.status === "error") {
+        if (!ok || payload.status === "error") {
           setError(payload.message || "Falha ao carregar processo para avaliação.")
           setView(null)
           return
@@ -265,7 +338,6 @@ export default function CppdAvaliacaoPage() {
           }
         })
         setItemState(initialState)
-
         setActiveItemId(null)
       } catch (err) {
         console.error("Erro ao carregar avaliação CPPD:", err)
@@ -292,37 +364,176 @@ export default function CppdAvaliacaoPage() {
     return buildTree(view.nodes, view.items)
   }, [view])
 
-  function computeNodeTotals(node: TreeNode) {
-    let docente = 0
-    let cppd = 0
-    let hasCppd = false
+  // ✅ pontos efetivos da CPPD (salvo ou preview do input quando item ativo)
+  function getEffectiveCppdPoints(itemId: number): number | null {
+    const s = scoreByItem.get(itemId)
+    if (!s) return null
 
-    node.items.forEach(item => {
-      const s = scoreByItem.get(item.idScoringItem)
-      if (s) {
-        docente += s.awardedPoints ?? 0
-        if (
-          s.evaluatorAwardedPoints !== null &&
-          s.evaluatorAwardedPoints !== undefined
-        ) {
-          cppd += s.evaluatorAwardedPoints
-          hasCppd = true
-        }
-      }
-    })
+    if (s.evaluatorAwardedPoints !== null && s.evaluatorAwardedPoints !== undefined) {
+      return safeNumber(s.evaluatorAwardedPoints)
+    }
 
-    node.children.forEach(child => {
-      const childTotals = computeNodeTotals(child)
-      docente += childTotals.docente
-      if (childTotals.cppd !== null) {
-        cppd += childTotals.cppd
-        hasCppd = true
-      }
-    })
+    if (activeItemId === itemId) {
+      const local = itemState[itemId]
+      const parsed = local ? parsePtbrNumber(local.evaluatorPointsInput) : null
+      if (parsed !== null) return parsed
+    }
+
+    return null
+  }
+
+  function getEffectivePointsForCppdOrDocente(itemId: number) {
+    const s = scoreByItem.get(itemId)
+    const docente = s ? safeNumber(s.awardedPoints) : 0
+    const cppd = getEffectiveCppdPoints(itemId)
 
     return {
       docente,
-      cppd: hasCppd ? cppd : null
+      cppd,
+      cppdOrDocente: cppd !== null ? cppd : docente
+    }
+  }
+
+  function evalFormulaDocente(
+    node: TreeNode,
+    baseFallback: number
+  ): { usedFormula: boolean; computed: number | null } {
+    if (!node.hasFormula || !node.formulaExpression) {
+      return { usedFormula: false, computed: null }
+    }
+
+    const vars: Record<string, number> = {}
+
+    node.items.forEach(item => {
+      if (!item.formulaKey) return
+      const pts = getEffectivePointsForCppdOrDocente(item.idScoringItem).docente
+      vars[item.formulaKey] = pts
+    })
+
+    try {
+      const argNames = Object.keys(vars)
+      const argValues = Object.values(vars)
+
+      if (argNames.length === 0) {
+        return { usedFormula: true, computed: baseFallback }
+      }
+
+      const fn = new Function(
+        ...argNames,
+        `return ${node.formulaExpression};`
+      ) as (...args: number[]) => number
+
+      const result = fn(...argValues)
+      const num = Number(result)
+
+      return { usedFormula: true, computed: Number.isFinite(num) ? num : baseFallback }
+    } catch (e) {
+      console.error("Erro avaliando fórmula do bloco (docente)", node.nodeId, e)
+      return { usedFormula: true, computed: baseFallback }
+    }
+  }
+
+  function evalFormulaCppd(
+    node: TreeNode,
+    baseFallback: number
+  ): { usedFormula: boolean; computed: number | null; hasAnyCppd: boolean } {
+    if (!node.hasFormula || !node.formulaExpression) {
+      return { usedFormula: false, computed: null, hasAnyCppd: false }
+    }
+
+    const vars: Record<string, number> = {}
+    let hasAnyCppd = false
+
+    node.items.forEach(item => {
+      if (!item.formulaKey) return
+      const { cppd, cppdOrDocente } = getEffectivePointsForCppdOrDocente(item.idScoringItem)
+      if (cppd !== null) hasAnyCppd = true
+      vars[item.formulaKey] = cppdOrDocente
+    })
+
+    try {
+      const argNames = Object.keys(vars)
+      const argValues = Object.values(vars)
+
+      if (argNames.length === 0) {
+        return { usedFormula: true, computed: baseFallback, hasAnyCppd }
+      }
+
+      const fn = new Function(
+        ...argNames,
+        `return ${node.formulaExpression};`
+      ) as (...args: number[]) => number
+
+      const result = fn(...argValues)
+      const num = Number(result)
+
+      return {
+        usedFormula: true,
+        computed: Number.isFinite(num) ? num : baseFallback,
+        hasAnyCppd
+      }
+    } catch (e) {
+      console.error("Erro avaliando fórmula do bloco (cppd)", node.nodeId, e)
+      return { usedFormula: true, computed: baseFallback, hasAnyCppd }
+    }
+  }
+
+  function computeNodeTotalDocente(node: TreeNode): NodeTotalsDocente {
+    const baseSum = node.items.reduce((acc, item) => {
+      const s = scoreByItem.get(item.idScoringItem)
+      return acc + (s ? safeNumber(s.awardedPoints) : 0)
+    }, 0)
+
+    const formula = evalFormulaDocente(node, baseSum)
+
+    const selfTotal =
+      formula.usedFormula && formula.computed !== null
+        ? formula.computed
+        : baseSum
+
+    const childrenSum = node.children.reduce((acc, child) => {
+      const childTotals = computeNodeTotalDocente(child)
+      return acc + childTotals.total
+    }, 0)
+
+    return {
+      total: selfTotal + childrenSum,
+      formulaValue: node.hasFormula && node.formulaExpression ? selfTotal : null
+    }
+  }
+
+  function computeNodeTotalCppd(node: TreeNode): NodeTotalsCppd {
+    let hasAnyCppdHere = false
+
+    const baseSum = node.items.reduce((acc, item) => {
+      const { cppd, cppdOrDocente } = getEffectivePointsForCppdOrDocente(item.idScoringItem)
+      if (cppd !== null) hasAnyCppdHere = true
+      return acc + cppdOrDocente
+    }, 0)
+
+    const formula = evalFormulaCppd(node, baseSum)
+    if (formula.hasAnyCppd) hasAnyCppdHere = true
+
+    const selfTotal =
+      formula.usedFormula && formula.computed !== null
+        ? formula.computed
+        : baseSum
+
+    let hasAnyCppdInChildren = false
+    const childrenSum = node.children.reduce((acc, child) => {
+      const childTotals = computeNodeTotalCppd(child)
+      if (childTotals.total !== null) hasAnyCppdInChildren = true
+      return acc + (childTotals.total ?? 0)
+    }, 0)
+
+    const any = hasAnyCppdHere || hasAnyCppdInChildren
+    if (!any) {
+      return { total: null, formulaValue: null }
+    }
+
+    return {
+      total: selfTotal + childrenSum,
+      formulaValue: node.hasFormula && node.formulaExpression ? selfTotal : null
     }
   }
 
@@ -339,11 +550,7 @@ export default function CppdAvaliacaoPage() {
 
   const evaluationProgress = useMemo(() => {
     if (!view) {
-      return {
-        totalFilled: 0,
-        totalEvaluated: 0,
-        allEvaluated: false
-      }
+      return { totalFilled: 0, totalEvaluated: 0, allEvaluated: false }
     }
 
     let totalFilled = 0
@@ -353,9 +560,7 @@ export default function CppdAvaliacaoPage() {
       const s = scoreByItem.get(item.idScoringItem)
       if (docentePreencheu(s)) {
         totalFilled += 1
-        if (itemAvaliado(s)) {
-          totalEvaluated += 1
-        }
+        if (itemAvaliado(s)) totalEvaluated += 1
       }
     })
 
@@ -390,18 +595,14 @@ export default function CppdAvaliacaoPage() {
 
   function handleSelectItem(itemId: number) {
     if (activeItemId !== null && activeItemId !== itemId) {
-      setInfoMessage(
-        "Conclua o item em avaliação (salvar ou cancelar) antes de selecionar outro."
-      )
+      setInfoMessage("Conclua o item em avaliação (salvar ou cancelar) antes de selecionar outro.")
       return
     }
 
     const score = scoreByItem.get(itemId)
 
     if (!docentePreencheu(score)) {
-      setInfoMessage(
-        "Este item não foi preenchido pelo docente e não está disponível para avaliação."
-      )
+      setInfoMessage("Este item não foi preenchido pelo docente e não está disponível para avaliação.")
       return
     }
 
@@ -409,25 +610,16 @@ export default function CppdAvaliacaoPage() {
 
     setItemState(prev => {
       const copy = { ...prev }
-      const current = copy[itemId] ?? {
-        evaluatorPointsInput: "",
-        evaluatorCommentInput: ""
-      }
-
+      const current = copy[itemId] ?? { evaluatorPointsInput: "", evaluatorCommentInput: "" }
       const s = scoreByItem.get(itemId)
 
-      // Preencher automaticamente com o valor do docente
       if (
-        (!current.evaluatorPointsInput ||
-          current.evaluatorPointsInput.trim() === "") &&
+        (!current.evaluatorPointsInput || current.evaluatorPointsInput.trim() === "") &&
         s &&
         s.evaluatorAwardedPoints === null &&
         docentePreencheu(s)
       ) {
-        copy[itemId] = {
-          ...current,
-          evaluatorPointsInput: formatPointsToInput(s.awardedPoints)
-        }
+        copy[itemId] = { ...current, evaluatorPointsInput: formatPointsToInput(s.awardedPoints) }
       } else if (!copy[itemId]) {
         copy[itemId] = current
       }
@@ -457,21 +649,12 @@ export default function CppdAvaliacaoPage() {
   }
 
   async function handleSaveItem(itemId: number) {
-    const local = itemState[itemId] ?? {
-      evaluatorPointsInput: "",
-      evaluatorCommentInput: ""
-    }
+    const local = itemState[itemId] ?? { evaluatorPointsInput: "", evaluatorCommentInput: "" }
 
     const rawPoints = local.evaluatorPointsInput.trim()
-    const evaluatorPoints =
-      rawPoints === ""
-        ? null
-        : Number(rawPoints.replace(".", "").replace(",", "."))
+    const evaluatorPoints = rawPoints === "" ? null : parsePtbrNumber(rawPoints)
 
-    if (
-      rawPoints !== "" &&
-      (evaluatorPoints === null || Number.isNaN(evaluatorPoints))
-    ) {
+    if (rawPoints !== "" && (evaluatorPoints === null || Number.isNaN(evaluatorPoints))) {
       setError("Informe um valor numérico válido para os pontos da CPPD.")
       return
     }
@@ -485,33 +668,28 @@ export default function CppdAvaliacaoPage() {
         scores: [
           {
             itemId,
-            evaluatorAwardedPoints:
-              evaluatorPoints === null ? null : evaluatorPoints.toString(),
+            evaluatorAwardedPoints: evaluatorPoints === null ? null : evaluatorPoints.toString(),
             evaluatorComment:
-              local.evaluatorCommentInput.trim() === ""
-                ? null
-                : local.evaluatorCommentInput.trim()
+              local.evaluatorCommentInput.trim() === "" ? null : local.evaluatorCommentInput.trim()
           }
         ]
       }
 
-      const res = await fetch(
+      const { ok, payload: body } = await fetchApi<ProcessEvaluationViewDto>(
         `/api/cppd/processos/${processId}/avaliacao/itens`,
         {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json"
-          },
           body: JSON.stringify(payload)
         }
       )
 
-      const body: ApiResponse<ProcessEvaluationViewDto> = await res.json()
+      if (!body) {
+        if (!ok) setError("Falha ao salvar pontuação do item para a CPPD.")
+        return
+      }
 
-      if (!res.ok || body.status === "error") {
-        setError(
-          body.message ?? "Falha ao salvar pontuação do item para a CPPD."
-        )
+      if (!ok || body.status === "error") {
+        setError(body.message ?? "Falha ao salvar pontuação do item para a CPPD.")
         return
       }
 
@@ -560,31 +738,25 @@ export default function CppdAvaliacaoPage() {
     setInfoMessage(null)
 
     try {
-      const payload = {
-        decision,
-        overrideOpinion: null as string | null
-      }
+      const payload = { decision, overrideOpinion: null as string | null }
 
-      const res = await fetch(
-        `/api/cppd/processos/${processId}/avaliacao/finalizar`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(payload)
-        }
-      )
-
-      const body: ApiResponse<{
+      const { ok, payload: body } = await fetchApi<{
         idProcess: number
         status: ProcessStatus
         finalPoints: number | null
         evaluationOpinion: string | null
         evaluatorUserIds: number[] | null
-      }> = await res.json()
+      }>(`/api/cppd/processos/${processId}/avaliacao/finalizar`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      })
 
-      if (!res.ok || body.status === "error") {
+      if (!body) {
+        if (!ok) setError("Falha ao finalizar avaliação.")
+        return
+      }
+
+      if (!ok || body.status === "error") {
         setError(body.message ?? "Falha ao finalizar avaliação.")
         return
       }
@@ -605,9 +777,7 @@ export default function CppdAvaliacaoPage() {
     return (
       <main className="min-h-[60vh]">
         <div className="px-4 py-8">
-          <p className="text-[var(--text-primary)]">
-            ID de processo inválido.
-          </p>
+          <p className="text-[var(--text-primary)]">ID de processo inválido.</p>
         </div>
       </main>
     )
@@ -617,9 +787,7 @@ export default function CppdAvaliacaoPage() {
     return (
       <main className="min-h-[60vh]">
         <div className="px-4 py-8">
-          <p className="text-[var(--text-secondary)]">
-            Carregando dados para avaliação da CPPD...
-          </p>
+          <p className="text-[var(--text-secondary)]">Carregando dados para avaliação da CPPD...</p>
         </div>
       </main>
     )
@@ -629,9 +797,7 @@ export default function CppdAvaliacaoPage() {
     return (
       <main className="min-h-[60vh]">
         <div className="px-4 py-8 space-y-4">
-          <p className="text-[var(--state-danger-text)] text-sm">
-            {error}
-          </p>
+          <p className="text-[var(--state-danger-text)] text-sm">{error}</p>
           <button
             type="button"
             onClick={() => router.refresh()}
@@ -650,9 +816,7 @@ export default function CppdAvaliacaoPage() {
     return (
       <main className="min-h-[60vh]">
         <div className="px-4 py-8">
-          <p className="text-[var(--text-secondary)]">
-            Nenhuma informação disponível para avaliação.
-          </p>
+          <p className="text-[var(--text-secondary)]">Nenhuma informação disponível para avaliação.</p>
         </div>
       </main>
     )
@@ -666,36 +830,33 @@ export default function CppdAvaliacaoPage() {
     const docenteFilled = docentePreencheu(score)
     const avaliado = itemAvaliado(score)
 
-    const changedByCppd =
-      avaliado &&
-      docenteFilled &&
-      score &&
-      score.evaluatorAwardedPoints !== null &&
-      Number(score.evaluatorAwardedPoints) !== Number(score.awardedPoints)
-
     const localState = itemState[item.idScoringItem] ?? {
       evaluatorPointsInput: "",
       evaluatorCommentInput: ""
     }
 
     const docentePoints = score?.awardedPoints ?? 0
+
     const cppdSavedPoints =
       score?.evaluatorAwardedPoints !== null &&
       score?.evaluatorAwardedPoints !== undefined
         ? score.evaluatorAwardedPoints
         : null
 
-    const cppdPointsInline =
-      score?.evaluatorAwardedPoints !== null &&
-      score?.evaluatorAwardedPoints !== undefined
-        ? score.evaluatorAwardedPoints
-        : localState.evaluatorPointsInput
-        ? Number(
-            localState.evaluatorPointsInput
-              .replace(".", "")
-              .replace(",", ".")
-          )
-        : null
+    const cppdPointsInline = (() => {
+      if (score?.evaluatorAwardedPoints !== null && score?.evaluatorAwardedPoints !== undefined) {
+        return score.evaluatorAwardedPoints
+      }
+      if (isActive) return parsePtbrNumber(localState.evaluatorPointsInput)
+      return null
+    })()
+
+    const changedByCppd =
+      avaliado &&
+      docenteFilled &&
+      score &&
+      score.evaluatorAwardedPoints !== null &&
+      Number(score.evaluatorAwardedPoints) !== Number(score.awardedPoints)
 
     const clickable = docenteFilled
 
@@ -704,9 +865,7 @@ export default function CppdAvaliacaoPage() {
         key={item.idScoringItem}
         className={
           "border border-[var(--border-subtle)] rounded-2xl p-3 bg-[var(--surface-muted-bg)] " +
-          (clickable
-            ? "hover:bg-[var(--surface-muted-hover)] cursor-pointer"
-            : "opacity-70 cursor-not-allowed") +
+          (clickable ? "hover:bg-[var(--surface-muted-hover)] cursor-pointer" : "opacity-70 cursor-not-allowed") +
           (isActive ? " ring-1 ring-[var(--border-strong)]" : "")
         }
         onClick={() => {
@@ -715,42 +874,45 @@ export default function CppdAvaliacaoPage() {
         }}
       >
         <div className="flex flex-col gap-2">
-          {/* Cabeçalho do item + badges + DOCENTE / CPPD quando NÃO está em edição */}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {avaliado && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium px-2 py-0.5 border border-emerald-100"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Avaliado
-                </span>
-              )}
+            <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center gap-2">
+                {avaliado && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium px-2 py-0.5 border border-emerald-100"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Avaliado
+                  </span>
+                )}
 
-              {!avaliado && !docenteFilled && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 text-[10px] font-medium px-2 py-0.5 border border-amber-100"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  Docente não preencheu
-                </span>
-              )}
+                {changedByCppd && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-medium px-2 py-0.5 border border-indigo-100"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                    Pontuação alterada
+                  </span>
+                )}
 
-              {changedByCppd && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-medium px-2 py-0.5 border border-indigo-100"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                  Pontuação alterada
+                <span className="text-sm font-medium text-[var(--text-primary)]">
+                  {item.description}
                 </span>
-              )}
 
-              <span className="text-sm font-medium text-[var(--text-primary)]">
-                {item.description}
-              </span>
+                {item.formulaKey && (
+                  <span
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold
+                               bg-[var(--surface-bg)] border border-[var(--border-subtle)]
+                               text-[var(--text-primary)]"
+                    onClick={e => e.stopPropagation()}
+                    title="Variável usada na fórmula do bloco"
+                  >
+                    {item.formulaKey}
+                  </span>
+                )}
+              </div>
             </div>
 
             {!isActive && (
@@ -761,10 +923,8 @@ export default function CppdAvaliacaoPage() {
                              text-[var(--text-primary)]"
                   onClick={e => e.stopPropagation()}
                 >
-                  Docente:{" "}
-                  <span className="ml-1 font-semibold">
-                    {formatNumber(docentePoints)} pts
-                  </span>
+                  Docente:
+                  <span className="ml-1 font-semibold">{formatNumber(docentePoints)} pts</span>
                 </span>
 
                 <span
@@ -773,67 +933,43 @@ export default function CppdAvaliacaoPage() {
                              text-[var(--text-primary)]"
                   onClick={e => e.stopPropagation()}
                 >
-                  CPPD:{" "}
+                  CPPD:
                   <span className="ml-1 font-semibold">
-                    {cppdSavedPoints !== null
-                      ? formatNumber(cppdSavedPoints)
-                      : "—"}{" "}
-                    pts
+                    {cppdSavedPoints !== null ? formatNumber(cppdSavedPoints) : "—"} pts
                   </span>
                 </span>
               </div>
             )}
           </div>
 
-          {/* Info de unidade / pontos base */}
           <div className="text-[11px] text-[var(--text-secondary)]">
             Unidade: {item.unit ?? "-"} · Pontos por unidade:{" "}
-            <span className="font-medium">
-              {formatNumber(item.points)}
-            </span>
+            <span className="font-medium">{formatNumber(item.points)}</span>
             {item.hasMaxPoints && item.maxPoints !== null && (
               <>
                 {" "}
-                · Máx:{" "}
-                <span className="font-medium">
-                  {formatNumber(item.maxPoints)}
-                </span>{" "}
-                pts
+                · Máx: <span className="font-medium">{formatNumber(item.maxPoints)}</span> pts
               </>
             )}
           </div>
 
-          {/* Área de edição da CPPD (expande dentro do item) */}
           {isActive && docenteFilled && (
-            <div
-              className="mt-2 pt-2 border-t border-[var(--border-subtle)]"
-              onClick={e => e.stopPropagation()}
-            >
+            <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]" onClick={e => e.stopPropagation()}>
               <div className="flex flex-col md:flex-row gap-3">
-                {/* Docente + CPPD descendo para a área de edição */}
                 <div className="w-full md:w-56">
                   <div className="mb-2">
-                    <div className="text-[11px] text-[var(--text-secondary)] mb-0.5">
-                      Pontos do docente
-                    </div>
+                    <div className="text-[11px] text-[var(--text-secondary)] mb-0.5">Pontos do docente</div>
                     <div className="text-xs font-semibold text-[var(--text-primary)] px-3 py-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-bg)] inline-flex">
                       {formatNumber(docentePoints)} pts
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-[var(--text-secondary)] mb-1">
-                      Avaliação da CPPD
-                    </label>
+                    <label className="block text-[11px] text-[var(--text-secondary)] mb-1">Avaliação da CPPD</label>
                     <input
                       type="text"
                       value={localState.evaluatorPointsInput}
-                      onChange={e =>
-                        handleChangeEvaluatorPoints(
-                          item.idScoringItem,
-                          e.target.value
-                        )
-                      }
+                      onChange={e => handleChangeEvaluatorPoints(item.idScoringItem, e.target.value)}
                       className="w-full text-xs rounded-full border border-[var(--border-subtle)]
                                  bg-[var(--surface-bg)] px-3 py-1.5
                                  text-right text-[var(--text-primary)]
@@ -842,31 +978,22 @@ export default function CppdAvaliacaoPage() {
                     />
                   </div>
 
-                  {cppdPointsInline !== null &&
-                    !Number.isNaN(cppdPointsInline) && (
-                      <div className="mt-1 text-[10px] text-[var(--text-secondary)]">
-                        CPPD (atual):{" "}
-                        <span className="font-semibold text-[var(--text-primary)]">
-                          {formatNumber(cppdPointsInline)} pts
-                        </span>
-                      </div>
-                    )}
+                  {cppdPointsInline !== null && !Number.isNaN(cppdPointsInline) && (
+                    <div className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                      CPPD (atual):
+                      <span className="ml-1 font-semibold text-[var(--text-primary)]">
+                        {formatNumber(cppdPointsInline)} pts
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Comentário */}
                 <div className="flex-1">
-                  <label className="block text-[11px] text-[var(--text-secondary)] mb-1">
-                    Comentário (opcional)
-                  </label>
+                  <label className="block text-[11px] text-[var(--text-secondary)] mb-1">Comentário (opcional)</label>
                   <textarea
                     rows={3}
                     value={localState.evaluatorCommentInput}
-                    onChange={e =>
-                      handleChangeEvaluatorComment(
-                        item.idScoringItem,
-                        e.target.value
-                      )
-                    }
+                    onChange={e => handleChangeEvaluatorComment(item.idScoringItem, e.target.value)}
                     className="w-full text-xs rounded-xl border border-[var(--border-subtle)]
                                bg-[var(--surface-bg)] px-3 py-2
                                text-[var(--text-primary)]
@@ -907,18 +1034,17 @@ export default function CppdAvaliacaoPage() {
 
   function renderNode(node: TreeNode) {
     const label = node.code ? `${node.code} - ${node.name}` : node.name
-    const totals = computeNodeTotals(node)
+
+    const docenteTotals = computeNodeTotalDocente(node)
+    const cppdTotals = computeNodeTotalCppd(node)
 
     return (
       <div key={node.nodeId} className="space-y-3">
         <div className="bg-[var(--surface-bg)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-sm">
-          {/* Cabeçalho do bloco */}
           <div className="flex justify-between items-center gap-2 mb-3">
             <div>
-              <div className="text-sm font-semibold text-[var(--text-primary)]">
-                {label}
-              </div>
-              {node.hasFormula && (
+              <div className="text-sm font-semibold text-[var(--text-primary)]">{label}</div>
+              {node.hasFormula && node.formulaExpression && (
                 <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
                   Bloco com cálculo automático
                 </div>
@@ -926,14 +1052,8 @@ export default function CppdAvaliacaoPage() {
             </div>
           </div>
 
-          {/* Itens */}
-          {node.items.length > 0 && (
-            <div className="space-y-3">
-              {node.items.map(item => renderItemRow(item))}
-            </div>
-          )}
+          {node.items.length > 0 && <div className="space-y-3">{node.items.map(item => renderItemRow(item))}</div>}
 
-          {/* Filhos */}
           {node.children.length > 0 && (
             <div className="mt-4 border-l-2 border-dashed border-[var(--border-subtle)] pl-4 space-y-4">
               {node.children.map(child => renderNode(child))}
@@ -941,29 +1061,47 @@ export default function CppdAvaliacaoPage() {
           )}
 
           {node.items.length === 0 && node.children.length === 0 && (
-            <p className="text-xs text-[var(--text-muted)]">
-              Nenhuma atividade cadastrada neste bloco.
-            </p>
+            <p className="text-xs text-[var(--text-muted)]">Nenhuma atividade cadastrada neste bloco.</p>
           )}
 
-          {/* Rodapé – resumo único do bloco */}
           <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2">
-            <div className="text-[11px] text-[var(--text-muted)]">
-              Resumo deste bloco
-            </div>
+            <div className="text-[11px] text-[var(--text-muted)]">Resumo deste bloco</div>
+
             <div className="flex flex-col items-end text-[11px]">
-              <span className="text-[var(--text-secondary)]">
-                Total de pontos (docente):
-              </span>
+              <span className="text-[var(--text-secondary)]">Total de pontos (docente):</span>
               <span className="font-semibold text-[var(--text-primary)]">
-                {formatNumber(totals.docente)} pts
+                {formatNumber(docenteTotals.total)} pts
               </span>
-              <span className="mt-1 text-[var(--text-secondary)]">
-                Total de pontos avaliados (CPPD):
-              </span>
+
+              <span className="mt-1 text-[var(--text-secondary)]">Total de pontos avaliados (CPPD):</span>
               <span className="font-semibold text-[var(--text-primary)]">
-                {totals.cppd !== null ? formatNumber(totals.cppd) : "—"} pts
+                {cppdTotals.total !== null ? formatNumber(cppdTotals.total) : "—"} pts
               </span>
+
+              {node.hasFormula && node.formulaExpression && (
+                <span className="mt-2 text-[10px] text-[var(--text-muted)] text-right whitespace-nowrap">
+                  Valor calculado a partir da fórmula:{" "}
+                  <span className="font-semibold text-[var(--text-primary)]">{node.formulaExpression}</span>
+                  <span className="ml-2">
+                    · Docente:{" "}
+                    <span className="font-semibold text-[var(--text-primary)]">
+                      {docenteTotals.formulaValue !== null ? formatNumber(docenteTotals.formulaValue) : "—"}
+                    </span>{" "}
+                    pts
+                  </span>
+                  <span className="ml-2">
+                    · CPPD:{" "}
+                    <span className="font-semibold text-[var(--text-primary)]">
+                      {cppdTotals.formulaValue !== null
+                        ? formatNumber(cppdTotals.formulaValue)
+                        : cppdTotals.total !== null
+                          ? formatNumber(cppdTotals.total)
+                          : "—"}
+                    </span>{" "}
+                    pts
+                  </span>
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -976,19 +1114,15 @@ export default function CppdAvaliacaoPage() {
   return (
     <main className="min-h-[60vh]">
       <div className="px-4 md:px-6 lg:px-8 py-6 space-y-6">
-        {/* Cabeçalho */}
         <header className="flex flex-wrap gap-3 justify-between items-center">
           <div>
-            <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
-              Avaliação da CPPD
-            </h1>
+            <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Avaliação da CPPD</h1>
             <p className="text-sm text-[var(--text-secondary)]">
               Processo #{process.idProcess} · {process.teacherName}
             </p>
             <p className="text-xs text-[var(--text-secondary)] mt-1">
               {process.campus} · {process.cidadeUF} · Interstício{" "}
-              {formatDateISOToBr(process.intersticeStart)} a{" "}
-              {formatDateISOToBr(process.intersticeEnd)} ·{" "}
+              {formatDateISOToBr(process.intersticeStart)} a {formatDateISOToBr(process.intersticeEnd)} ·{" "}
               {process.classeOrigem}
               {process.nivelOrigem} → {process.classeDestino}
               {process.nivelDestino}
@@ -999,8 +1133,7 @@ export default function CppdAvaliacaoPage() {
             <div className="text-[11px] text-[var(--text-secondary)]">
               Itens preenchidos pelo docente:{" "}
               <span className="font-semibold text-[var(--text-primary)]">
-                {evaluationProgress.totalEvaluated} /{" "}
-                {evaluationProgress.totalFilled}
+                {evaluationProgress.totalEvaluated} / {evaluationProgress.totalFilled}
               </span>
             </div>
             <div className="flex gap-2">
@@ -1016,25 +1149,14 @@ export default function CppdAvaliacaoPage() {
           </div>
         </header>
 
-        {/* Mensagens globais */}
         {(infoMessage || error) && (
           <div className="space-y-1">
-            {infoMessage && (
-              <p className="text-xs text-[var(--state-success-text)]">
-                {infoMessage}
-              </p>
-            )}
-            {error && (
-              <p className="text-xs text-[var(--state-danger-text)]">
-                {error}
-              </p>
-            )}
+            {infoMessage && <p className="text-xs text-[var(--state-success-text)]">{infoMessage}</p>}
+            {error && <p className="text-xs text-[var(--state-danger-text)]">{error}</p>}
           </div>
         )}
 
-        {/* Layout principal: metade esquerda blocos, metade direita comprovante com painel fixo */}
         <section className="flex flex-col md:flex-row gap-4 md:items-start">
-          {/* Coluna esquerda */}
           <div className="w-full md:w-1/2 space-y-4">
             {treeRoots.length === 0 && (
               <div className="bg-[var(--surface-bg)] border border-[var(--border-subtle)] rounded-2xl p-4 shadow-sm text-sm text-[var(--text-secondary)]">
@@ -1056,29 +1178,23 @@ export default function CppdAvaliacaoPage() {
                              disabled:opacity-60 disabled:cursor-not-allowed
                              transition"
                 >
-                  {finalizing
-                    ? "Finalizando avaliação..."
-                    : "Finalizar avaliação da CPPD"}
+                  {finalizing ? "Finalizando avaliação..." : "Finalizar avaliação da CPPD"}
                 </button>
               </div>
             )}
           </div>
 
-          {/* Coluna direita: comprovante grande fixo na tela (sticky) ocupando metade da página */}
           <div className="w-full md:w-1/2 md:sticky md:top-4 self-start">
             <div
               className="bg-[var(--surface-bg)] border border-[var(--border-subtle)]
                           rounded-2xl p-4 shadow-sm min-h-[400px] md:min-h-[500px]
                           flex flex-col"
             >
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
-                Comprovante anexado
-              </h2>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-2">Comprovante anexado</h2>
 
               {!activeItemId && (
                 <p className="text-xs text-[var(--text-secondary)]">
-                  Selecione um item preenchido pelo docente para visualizar o
-                  comprovante correspondente.
+                  Selecione um item preenchido pelo docente para visualizar o comprovante correspondente.
                 </p>
               )}
 
@@ -1092,9 +1208,7 @@ export default function CppdAvaliacaoPage() {
                 <>
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-[var(--text-primary)] truncate">
-                        {currentEvidence.originalName}
-                      </p>
+                      <p className="text-xs text-[var(--text-primary)] truncate">{currentEvidence.originalName}</p>
                       {currentEvidence.sizeBytes && (
                         <p className="text-[10px] text-[var(--text-secondary)]">
                           Tamanho: {currentEvidence.sizeBytes} bytes
@@ -1105,19 +1219,14 @@ export default function CppdAvaliacaoPage() {
                       href={previewUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-[11px] font-medium
-                                 text-[var(--link-primary)]
-                                 hover:underline"
+                      className="text-[11px] font-medium text-[var(--link-primary)] hover:underline"
                     >
                       Abrir em nova aba
                     </a>
                   </div>
 
                   <div className="mt-2 border border-[var(--border-subtle)] rounded-xl overflow-hidden h-[60vh] md:h-[70vh]">
-                    <iframe
-                      src={previewUrl}
-                      className="w-full h-full bg-[var(--surface-muted)]"
-                    />
+                    <iframe src={previewUrl} className="w-full h-full bg-[var(--surface-muted)]" />
                   </div>
                 </>
               )}

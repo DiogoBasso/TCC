@@ -22,6 +22,7 @@ export interface EvaluationNodeDto {
   code: string | null
   sortOrder: number
   hasFormula: boolean
+  formulaExpression: string | null
 }
 
 export interface EvaluationItemDto {
@@ -32,6 +33,7 @@ export interface EvaluationItemDto {
   unit: string | null
   hasMaxPoints: boolean
   maxPoints: number | null
+  formulaKey: string | null
 }
 
 export interface EvaluationScoreDto {
